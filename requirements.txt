@@ -1,4 +1,4 @@
-langchain
+langchain>=0.2.0
 langchain-community
 langchain-chroma
 langchain-openai
