@@ -32,7 +32,7 @@ def load_rag_system():
         search_type="similarity_score_threshold",  # 1. 啟用「門檻過濾」模式
         search_kwargs={
             "k": 5,  # 最多還是抓 5 筆
-            "score_threshold": 0.7  # 2. 設定門檻：相似度低於 0.7 的直接丟掉
+            "score_threshold": 0.5  # 2. 設定門檻：相似度低於 0.7 的直接丟掉
         }
     )
 
