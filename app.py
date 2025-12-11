@@ -2,7 +2,7 @@ import streamlit as st
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 import os
@@ -13,7 +13,7 @@ st.title("⚖️ 企業勞基法智慧問答助手")
 st.caption("🚀 Powered by RAG (LangChain + ChromaDB + OpenAI)")
 
 
-# 2. 載入環境與資料庫 (利用 cache resource 加速，不用每次重新讀取)
+# 2. 載入環境與資料庫 (利用 cache resource 加速)
 @st.cache_resource
 def load_rag_system():
     load_dotenv()
@@ -26,6 +26,7 @@ def load_rag_system():
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
+
     # 這裡我們維持 k=5 的成功設定
     retriever = db.as_retriever(search_kwargs={"k": 5})
 
@@ -47,12 +48,30 @@ def load_rag_system():
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    # === 🔥 關鍵修改開始：使用 RunnableParallel 來保留來源文件 ===
+
+    # 1. 先定義檢索步驟：同時取得「文件(context)」和「問題(question)」
+    retrieval_step = RunnableParallel(
+        {"context": retriever, "question": RunnablePassthrough()}
+    )
+
+    # 2. 定義回答生成步驟：把 context 轉成字串 -> 丟給 Prompt -> LLM
+    answer_step = (
+            RunnablePassthrough.assign(context=lambda x: format_docs(x["context"]))
             | prompt
             | llm
             | StrOutputParser()
     )
+
+    # 3. 組合最終鏈：同時回傳「原始文件 (source_documents)」和「AI回答 (answer)」
+    rag_chain = (
+            retrieval_step
+            | RunnableParallel({
+        "source_documents": lambda x: x["context"],
+        "answer": answer_step
+    })
+    )
+    # === 🔥 關鍵修改結束 ===
 
     return rag_chain
 
@@ -68,6 +87,11 @@ if "messages" not in st.session_state:
 # 顯示歷史訊息
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
+    # 如果歷史訊息中有來源資訊，也顯示出來 (可選)
+    if "sources" in msg:
+        with st.expander("查看參考來源"):
+            for source in msg["sources"]:
+                st.markdown(f"- **{source['source']}** (Page {source['page']})")
 
 # 4. 處理使用者輸入
 if prompt := st.chat_input():
@@ -79,8 +103,39 @@ if prompt := st.chat_input():
     if rag_chain:
         with st.chat_message("assistant"):
             with st.spinner("🔍 正在檢索法規資料庫..."):
-                response = rag_chain.invoke(prompt)
-                st.write(response)
+                # 呼叫 invoke，現在 response 會是一個字典 (Dictionary)
+                result = rag_chain.invoke(prompt)
 
-        # 存入歷史紀錄
-        st.session_state.messages.append({"role": "assistant", "content": response})
+                answer = result["answer"]
+                source_docs = result["source_documents"]
+
+                # 顯示回答
+                st.write(answer)
+
+                # === 🔥 新增：顯示資料來源 ===
+                # 整理來源資訊，避免重複顯示相同的頁數
+                unique_sources = []
+                seen_sources = set()
+
+                for doc in source_docs:
+                    # 取得檔名 (去除路徑) 和頁數
+                    source_name = os.path.basename(doc.metadata.get("source", "未知來源"))
+                    page_num = doc.metadata.get("page", 0) + 1  # 程式從0開始，習慣上加1顯示
+
+                    identifier = f"{source_name}-{page_num}"
+                    if identifier not in seen_sources:
+                        unique_sources.append({"source": source_name, "page": page_num})
+                        seen_sources.add(identifier)
+
+                # 使用折疊元件 (Expander) 顯示來源
+                with st.expander("📚 查看資料來源 (Source Documents)"):
+                    for item in unique_sources:
+                        st.markdown(f"- 📄 **{item['source']}** : 第 {item['page']} 頁")
+                    st.caption("註：頁數為 PDF 原始頁碼")
+
+        # 存入歷史紀錄 (包含來源資訊，以便重新整理頁面時也能顯示)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer,
+            "sources": unique_sources
+        })
