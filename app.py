@@ -27,8 +27,15 @@ def load_rag_system():
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
     db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
 
-    # 這裡我們維持 k=5 的成功設定
-    retriever = db.as_retriever(search_kwargs={"k": 5})
+    # 修改後的 retriever 設定
+    retriever = db.as_retriever(
+        search_type="similarity_score_threshold",  # 1. 啟用「門檻過濾」模式
+        search_kwargs={
+            "k": 5,  # 最多還是抓 5 筆
+            "score_threshold": 0.7  # 2. 設定門檻：相似度低於 0.7 的直接丟掉
+        }
+    )
+
 
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
