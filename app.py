@@ -49,25 +49,26 @@ def load_rag_system():
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # 建立 RAG 鏈 (包含回傳來源文件)
-    rag_chain_with_source = (
-            RunnableParallel({"context": retriever, "question": RunnablePassthrough()})
-            | RunnableParallel({
-        "answer": (lambda x: format_docs(x["context"])) | (
-            lambda context: prompt.format(context=context, question=prompt)) | llm | StrOutputParser(),
-        # 這裡簡化邏輯，實際上我們會重新組裝
-        "docs": lambda x: x["context"]  # 保留原始文件以便顯示
-    })
+    # --- 修正後的 RAG 鏈結邏輯 (更穩定) ---
+
+    # 步驟 1: 平行處理 - 一邊去抓資料(context)，一邊保留使用者問題(question)
+    retrieval_step = RunnableParallel(
+        {"context": retriever, "question": RunnablePassthrough()}
     )
 
-    # 修正後的鏈結邏輯，確保能同時拿到回答與來源
-    final_chain = (
-            {"context": retriever, "question": RunnablePassthrough()}
-            | RunnableParallel({
-        "response": prompt | llm | StrOutputParser(),
+    # 步驟 2: 生成回答 - 將抓到的資料格式化成字串，然後餵給 LLM
+    answer_step = (
+            RunnablePassthrough.assign(context=lambda x: format_docs(x["context"]))
+            | prompt
+            | llm
+            | StrOutputParser()
+    )
+
+    # 步驟 3: 組合最終輸出 - 回傳「AI回答」以及「原始文件(用於顯示來源)」
+    final_chain = retrieval_step | RunnableParallel({
+        "response": answer_step,
         "context": lambda x: x["context"]
     })
-    )
 
     return final_chain
 
@@ -90,23 +91,30 @@ if prompt := st.chat_input():
     if rag_chain:
         with st.chat_message("assistant"):
             with st.spinner("🔍 正在檢索法規資料庫..."):
-                # 執行 RAG
-                result = rag_chain.invoke(prompt)
+                try:
+                    # 執行 RAG
+                    result = rag_chain.invoke(prompt)
 
-                response_text = result["response"]
-                source_docs = result["context"]
+                    response_text = result["response"]
+                    source_docs = result["context"]
 
-                # 顯示回答
-                st.write(response_text)
+                    # 顯示回答
+                    st.write(response_text)
 
-                # 顯示資料來源 (Expander)
-                with st.expander("📚 查看資料來源 (Source Documents)"):
-                    for i, doc in enumerate(source_docs):
-                        page = doc.metadata.get('page', 'Unknown')
-                        source = os.path.basename(doc.metadata.get('source', 'Unknown'))
-                        st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
-                        st.text(doc.page_content[:100] + "...")  # 只顯示前100字預覽
-                        st.divider()
+                    # 顯示資料來源 (Expander)
+                    with st.expander("📚 查看資料來源 (Source Documents)"):
+                        if not source_docs:
+                            st.info("沒有找到相關的來源文件。")
+                        else:
+                            for i, doc in enumerate(source_docs):
+                                page = doc.metadata.get('page', 'Unknown')
+                                source = os.path.basename(doc.metadata.get('source', 'Unknown'))
+                                st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
+                                st.text(doc.page_content[:100] + "...")  # 只顯示前100字預覽
+                                st.divider()
 
-                # 更新紀錄
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                    # 更新紀錄
+                    st.session_state.messages.append({"role": "assistant", "content": response_text})
+
+                except Exception as e:
+                    st.error(f"發生錯誤：{e}")
