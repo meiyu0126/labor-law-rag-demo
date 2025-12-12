@@ -11,8 +11,8 @@ import os
 
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
-st.title("⚖️ 企業勞基法智慧問答助手 (V19 - Optimal Tuning)")
-st.caption("🚀 Powered by Large Model + Optimized Chunking & MMR")
+st.title("⚖️ 企業勞基法智慧問答助手")
+st.caption("🚀 Powered by Large Model ")
 
 
 # 2. 建立資料庫
@@ -29,14 +29,14 @@ def build_vector_db_in_memory(file_path, embedding_function):
         # 【優化 1】加大 chunk_size 到 800
         # 這樣可以確保第 30 條這種長條文能被完整包含，不會只顯示一小段
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=50,
+            chunk_size=600,
+            chunk_overlap=20,
             separators=["\n\n", "\n", "。", "！", "？", "，"]
         )
         chunks = text_splitter.split_documents(docs)
 
         # 過濾太短的雜訊
-        clean_chunks = [c for c in chunks if len(c.page_content) > 100]
+        clean_chunks = [c for c in chunks if len(c.page_content) > 150]
 
         db = Chroma.from_documents(
             documents=clean_chunks,
@@ -112,7 +112,7 @@ def load_rag_system_v19():
 
 # 4. 初始化 Session
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手 (V19)。"}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手,請輸入勞基法相關查詢我會盡力為你提供說明。"}]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
