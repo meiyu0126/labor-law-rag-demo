@@ -1,35 +1,75 @@
 import streamlit as st
+import os
+import shutil
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
-import os
 
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
 st.title("⚖️ 企業勞基法智慧問答助手")
-st.caption("🚀 Powered by RAG (LangChain + ChromaDB + OpenAI)")
+st.caption("🚀 Powered by RAG (Auto-Build on Cloud)")
 
 
-# 2. 載入資料庫
+# 2. 定義一個函式來「現場建立」資料庫
+def build_vector_db(file_path, db_path, embedding_function):
+    with st.spinner("📦 正在雲端環境初始化資料庫 (初次執行需約 10-20 秒)..."):
+        # 讀取 PDF
+        loader = PyPDFLoader(file_path)
+        docs = loader.load()
+
+        # 切分文字
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50,
+            separators=["\n\n", "\n", "。", "！", "？", "，"]
+        )
+        chunks = text_splitter.split_documents(docs)
+
+        # 建立資料庫
+        db = Chroma.from_documents(
+            documents=chunks,
+            embedding=embedding_function,
+            persist_directory=db_path
+        )
+        return db
+
+
+# 3. 載入 RAG 系統 (快取資源)
 @st.cache_resource
 def load_rag_system():
     load_dotenv()
-    CHROMA_PATH = "chroma_db"
 
-    if not os.path.exists(CHROMA_PATH):
-        st.error("❌ 找不到向量資料庫，請確認已執行 ingest.py 並將 chroma_db 上傳至 GitHub！")
-        return None
+    # 設定路徑 (改個新名字，避免讀到舊的壞檔)
+    FILE_PATH = os.path.join("data", "labor_law.pdf")
+    CHROMA_PATH = "chroma_db_cloud"
 
-    # 使用與 ingest.py 相同的模型
+    # 準備 Embedding 模型
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
-    db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
 
-    # 設定檢索器 (k=5)
+    # --- 關鍵邏輯：檢查資料庫是否存在 ---
+    if os.path.exists(CHROMA_PATH):
+        # 嘗試讀取
+        try:
+            db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
+            # 簡單測試是否能運作，如果報錯就重建
+            db._collection.count()
+        except:
+            # 如果讀取失敗 (例如 Windows/Linux 相容性問題)，刪除重建
+            shutil.rmtree(CHROMA_PATH)
+            db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
+    else:
+        # 如果不存在，直接建立
+        db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
+
+    # --- 以下是正常的 RAG 流程 ---
+
     retriever = db.as_retriever(search_kwargs={"k": 5})
-
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
     template = """你是一個專業的勞基法問答助手。
@@ -45,18 +85,13 @@ def load_rag_system():
 
     prompt = ChatPromptTemplate.from_template(template)
 
-    # 定義格式化文件的函式
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # --- 修正後的 RAG 鏈結邏輯 (更穩定) ---
-
-    # 步驟 1: 平行處理 - 一邊去抓資料(context)，一邊保留使用者問題(question)
     retrieval_step = RunnableParallel(
         {"context": retriever, "question": RunnablePassthrough()}
     )
 
-    # 步驟 2: 生成回答 - 將抓到的資料格式化成字串，然後餵給 LLM
     answer_step = (
             RunnablePassthrough.assign(context=lambda x: format_docs(x["context"]))
             | prompt
@@ -64,7 +99,6 @@ def load_rag_system():
             | StrOutputParser()
     )
 
-    # 步驟 3: 組合最終輸出 - 回傳「AI回答」以及「原始文件(用於顯示來源)」
     final_chain = retrieval_step | RunnableParallel({
         "response": answer_step,
         "context": lambda x: x["context"]
@@ -75,7 +109,7 @@ def load_rag_system():
 
 rag_chain = load_rag_system()
 
-# 3. 初始化對話
+# 4. 初始化對話
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "你好！我是你的勞基法 AI 助手。請輸入你想查詢的勞基法問題："}]
@@ -83,7 +117,7 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 4. 處理輸入
+# 5. 處理輸入
 if prompt := st.chat_input():
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
@@ -92,16 +126,12 @@ if prompt := st.chat_input():
         with st.chat_message("assistant"):
             with st.spinner("🔍 正在檢索法規資料庫..."):
                 try:
-                    # 執行 RAG
                     result = rag_chain.invoke(prompt)
-
                     response_text = result["response"]
                     source_docs = result["context"]
 
-                    # 顯示回答
                     st.write(response_text)
 
-                    # 顯示資料來源 (Expander)
                     with st.expander("📚 查看資料來源 (Source Documents)"):
                         if not source_docs:
                             st.info("沒有找到相關的來源文件。")
@@ -109,11 +139,11 @@ if prompt := st.chat_input():
                             for i, doc in enumerate(source_docs):
                                 page = doc.metadata.get('page', 'Unknown')
                                 source = os.path.basename(doc.metadata.get('source', 'Unknown'))
+                                # [重要] 這裡加上來源驗證
                                 st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
-                                st.text(doc.page_content[:100] + "...")  # 只顯示前100字預覽
+                                st.text(doc.page_content[:100] + "...")
                                 st.divider()
 
-                    # 更新紀錄
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
 
                 except Exception as e:
