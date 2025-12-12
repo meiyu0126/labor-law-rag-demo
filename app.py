@@ -13,63 +13,69 @@ from dotenv import load_dotenv
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
 st.title("⚖️ 企業勞基法智慧問答助手")
-st.caption("🚀 Powered by RAG (Auto-Build on Cloud)")
+st.caption("🚀 Powered by RAG (Force Cloud Build v4)")
 
 
-# 2. 定義一個函式來「現場建立」資料庫
+# 2. 定義建立資料庫函式
 def build_vector_db(file_path, db_path, embedding_function):
-    # 確保這行文字存在，這樣你才會在網頁上看到轉圈圈
-    with st.spinner("🏗️ 偵測到新環境！正在重新建立向量資料庫 (約需 20 秒)..."):
-        # 讀取 PDF
-        loader = PyPDFLoader(file_path)
-        docs = loader.load()
+    # 顯示明顯的提示
+    with st.spinner("⚠️ 正在強制重建模組 (v4)... 這需要約 20~30 秒，請稍候..."):
+        try:
+            # 讀取 PDF
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            if not docs:
+                st.error("❌ 讀取到的 PDF 為空！請檢查 data/labor_law.pdf 是否正確上傳。")
+                return None
 
-        # 切分文字
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,
-            separators=["\n\n", "\n", "。", "！", "？", "，"]
-        )
-        chunks = text_splitter.split_documents(docs)
+            # 切分文字
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=500,
+                chunk_overlap=50,
+                separators=["\n\n", "\n", "。", "！", "？", "，"]
+            )
+            chunks = text_splitter.split_documents(docs)
+            st.toast(f"📄 PDF 讀取成功，共切分出 {len(chunks)} 個片段", icon="✅")
 
-        # 建立資料庫
-        db = Chroma.from_documents(
-            documents=chunks,
-            embedding=embedding_function,
-            persist_directory=db_path
-        )
-        return db
+            # 建立資料庫
+            db = Chroma.from_documents(
+                documents=chunks,
+                embedding=embedding_function,
+                persist_directory=db_path
+            )
+            return db
+        except Exception as e:
+            st.error(f"❌ 資料庫建立失敗：{str(e)}")
+            return None
 
 
-# 3. 載入 RAG 系統 (快取資源)
+# 3. 載入 RAG 系統
 @st.cache_resource
 def load_rag_system():
     load_dotenv()
 
-    # 設定路徑 (改個新名字，避免讀到舊的壞檔)
+    # 設定路徑
     FILE_PATH = os.path.join("data", "labor_law.pdf")
-    CHROMA_PATH = "chroma_db_v3_force_rebuild"
+    # 改一個新名字 v4，確保絕對乾淨
+    CHROMA_PATH = "chroma_db_v4_final"
 
-    # 準備 Embedding 模型
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
 
-    # --- 關鍵邏輯：檢查資料庫是否存在 ---
+    # 【關鍵修改】：不再檢查是否存在，直接刪除舊的並重建
+    # 這樣就排除了「程式以為資料庫已存在而跳過」的可能性
     if os.path.exists(CHROMA_PATH):
-        # 嘗試讀取
         try:
-            db = Chroma(persist_directory=CHROMA_PATH, embedding_function=embedding_function)
-            # 簡單測試是否能運作，如果報錯就重建
-            db._collection.count()
-        except:
-            # 如果讀取失敗 (例如 Windows/Linux 相容性問題)，刪除重建
             shutil.rmtree(CHROMA_PATH)
-            db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
-    else:
-        # 如果不存在，直接建立
-        db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
+        except:
+            pass
 
-    # --- 以下是正常的 RAG 流程 ---
+            # 強制執行建立流程
+    db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
 
+    if db is None:
+        return None
+
+    # --- RAG 流程 ---
     retriever = db.as_retriever(search_kwargs={"k": 5})
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
@@ -140,7 +146,6 @@ if prompt := st.chat_input():
                             for i, doc in enumerate(source_docs):
                                 page = doc.metadata.get('page', 'Unknown')
                                 source = os.path.basename(doc.metadata.get('source', 'Unknown'))
-                                # [重要] 這裡加上來源驗證
                                 st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
                                 st.text(doc.page_content[:100] + "...")
                                 st.divider()
