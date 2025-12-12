@@ -11,34 +11,37 @@ import os
 
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
-st.title("⚖️ 企業勞基法智慧問答助手 (V20 - No Duplicates)")
-st.caption("🚀 Powered by Large Model + Aggressive De-Duplication")
+st.title("⚖️ 企業勞基法智慧問答助手 (V19 - Optimal Tuning)")
+st.caption("🚀 Powered by Large Model + Optimized Chunking & MMR")
 
 
 # 2. 建立資料庫
 def build_vector_db_in_memory(file_path, embedding_function):
     try:
-        print(f"--- [V20] 開始建立記憶體資料庫 ---")
+        print(f"--- [V19] 開始建立記憶體資料庫 ---")
+
         loader = PyPDFLoader(file_path)
         docs = loader.load()
-        if not docs: return None
+        if not docs:
+            print("❌ 錯誤: PDF 內容為空")
+            return None
 
-        # 【優化 1 & 2】加大 size 確保完整，減少 overlap 避免重複
+        # 【優化 1】加大 chunk_size 到 800
+        # 這樣可以確保第 30 條這種長條文能被完整包含，不會只顯示一小段
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,  # 加大到 1000，確保完整法條不被切斷
-            chunk_overlap=50,  # 減少重疊到 50，避免兩個 chunk 長太像
+            chunk_size=800,
+            chunk_overlap=50,
             separators=["\n\n", "\n", "。", "！", "？", "，"]
         )
         chunks = text_splitter.split_documents(docs)
 
-        # 過濾短句
+        # 過濾太短的雜訊
         clean_chunks = [c for c in chunks if len(c.page_content) > 50]
 
-        # 建立新資料庫
         db = Chroma.from_documents(
             documents=clean_chunks,
             embedding=embedding_function,
-            collection_name="labor_laws_v20_dedup"
+            collection_name="labor_laws_v19_optimized"
         )
         print("✅ 資料庫建立成功！")
         return db
@@ -50,7 +53,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
 # 3. 載入系統
 @st.cache_resource(show_spinner=False)
-def load_rag_system_v20():
+def load_rag_system_v19():
     load_dotenv()
     FILE_PATH = os.path.join("data", "labor_law.pdf")
 
@@ -59,13 +62,15 @@ def load_rag_system_v20():
     db = build_vector_db_in_memory(FILE_PATH, embedding_function)
     if db is None: return None
 
-    # 【優化 3】調低 lambda_mult，強迫多樣性
+    # 【優化 2 & 3】調整 MMR 參數
+    # lambda_mult=0.85: 強烈要求「相關性」，只允許一點點「多樣性」。
+    # k=4: 只取前 4 名，避免第 5 名開始出現不相關的雜訊。
     retriever = db.as_retriever(
         search_type="mmr",
         search_kwargs={
             "k": 4,
             "fetch_k": 20,
-            "lambda_mult": 0.5  # 降到 0.5 (關鍵！)：強迫系統去找「不一樣」的條文
+            "lambda_mult": 0.85
         }
     )
 
@@ -107,15 +112,15 @@ def load_rag_system_v20():
 
 # 4. 初始化 Session
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手 (V20)。"}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手 (V19)。"}]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
 # 5. 載入系統
 if "rag_chain" not in st.session_state:
-    with st.spinner("🚀 [V20] 系統優化中... 正在執行極致去重策略..."):
-        st.session_state.rag_chain = load_rag_system_v20()
+    with st.spinner("🚀 [V19] 系統優化中... 正在調整切片大小與權重..."):
+        st.session_state.rag_chain = load_rag_system_v19()
 
 rag_chain = st.session_state.rag_chain
 
@@ -126,7 +131,7 @@ if prompt := st.chat_input():
 
     if rag_chain:
         with st.chat_message("assistant"):
-            with st.spinner("🔍 檢索中..."):
+            with st.spinner("🔍 正在進行精準檢索..."):
                 try:
                     result = rag_chain.invoke(prompt)
                     response_text = result["response"]
@@ -135,7 +140,7 @@ if prompt := st.chat_input():
                     st.write(response_text)
 
                     if source_docs:
-                        with st.expander("📚 查看最佳參考來源 (Top 4 - Distinct)", expanded=True):
+                        with st.expander("📚 查看最佳參考來源 (Top 4 - Optimized)", expanded=True):
                             for i, doc in enumerate(source_docs):
                                 try:
                                     page_idx = doc.metadata.get('page', 0)
