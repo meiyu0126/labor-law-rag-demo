@@ -13,63 +13,64 @@ from dotenv import load_dotenv
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
 st.title("⚖️ 企業勞基法智慧問答助手")
-st.caption("🚀 Powered by RAG (Force Cloud Build v4)")
+st.caption("🚀 Powered by RAG (Final Fix - Linux Cloud Build)")
 
 
-# 2. 定義建立資料庫函式
+# 2. 定義建立資料庫函式 (移除 UI 元件，純粹做邏輯)
 def build_vector_db(file_path, db_path, embedding_function):
-    # 顯示明顯的提示
-    with st.spinner("⚠️ 正在強制重建模組 (v4)... 這需要約 20~30 秒，請稍候..."):
-        try:
-            # 讀取 PDF
-            loader = PyPDFLoader(file_path)
-            docs = loader.load()
-            if not docs:
-                st.error("❌ 讀取到的 PDF 為空！請檢查 data/labor_law.pdf 是否正確上傳。")
-                return None
+    try:
+        # 讀取 PDF
+        print(f"正在讀取 PDF: {file_path}")  # 改用 print (會在後台 log 顯示)
+        loader = PyPDFLoader(file_path)
+        docs = loader.load()
 
-            # 切分文字
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=500,
-                chunk_overlap=50,
-                separators=["\n\n", "\n", "。", "！", "？", "，"]
-            )
-            chunks = text_splitter.split_documents(docs)
-            st.toast(f"📄 PDF 讀取成功，共切分出 {len(chunks)} 個片段", icon="✅")
-
-            # 建立資料庫
-            db = Chroma.from_documents(
-                documents=chunks,
-                embedding=embedding_function,
-                persist_directory=db_path
-            )
-            return db
-        except Exception as e:
-            st.error(f"❌ 資料庫建立失敗：{str(e)}")
+        if not docs:
+            print("❌ PDF 為空")
             return None
 
+        # 切分文字
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50,
+            separators=["\n\n", "\n", "。", "！", "？", "，"]
+        )
+        chunks = text_splitter.split_documents(docs)
+        print(f"📄 切分完成，共 {len(chunks)} 筆")
 
-# 3. 載入 RAG 系統
+        # 建立資料庫
+        db = Chroma.from_documents(
+            documents=chunks,
+            embedding=embedding_function,
+            persist_directory=db_path
+        )
+        return db
+    except Exception as e:
+        print(f"❌ 建立資料庫時發生錯誤: {e}")
+        return None
+
+
+# 3. 載入 RAG 系統 (快取資源)
+# 注意：這裡面不能有 st.spinner 或 st.toast
 @st.cache_resource
 def load_rag_system():
     load_dotenv()
 
     # 設定路徑
     FILE_PATH = os.path.join("data", "labor_law.pdf")
-    # 改一個新名字 v4，確保絕對乾淨
-    CHROMA_PATH = "chroma_db_v4_final"
+    # 我們再次改名，確保徹底避開之前的錯誤快取
+    CHROMA_PATH = "chroma_db_v5_linux"
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
 
-    # 【關鍵修改】：不再檢查是否存在，直接刪除舊的並重建
-    # 這樣就排除了「程式以為資料庫已存在而跳過」的可能性
+    # 強制清理舊資料 (確保是用雲端環境新建的)
     if os.path.exists(CHROMA_PATH):
         try:
             shutil.rmtree(CHROMA_PATH)
+            print("🧹 舊資料庫已刪除")
         except:
             pass
 
-            # 強制執行建立流程
+    # 執行建立
     db = build_vector_db(FILE_PATH, CHROMA_PATH, embedding_function)
 
     if db is None:
@@ -114,15 +115,18 @@ def load_rag_system():
     return final_chain
 
 
-rag_chain = load_rag_system()
-
-# 4. 初始化對話
+# 4. 在主程式中呼叫，並在這裡放轉圈圈
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "你好！我是你的勞基法 AI 助手。請輸入你想查詢的勞基法問題："}]
 
+# 顯示歷史訊息
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
+
+# --- 初始化 RAG (加上轉圈圈) ---
+with st.spinner("📦 系統初始化中... 正在雲端建立全新的向量資料庫 (約需 20 秒)..."):
+    rag_chain = load_rag_system()
 
 # 5. 處理輸入
 if prompt := st.chat_input():
@@ -146,6 +150,8 @@ if prompt := st.chat_input():
                             for i, doc in enumerate(source_docs):
                                 page = doc.metadata.get('page', 'Unknown')
                                 source = os.path.basename(doc.metadata.get('source', 'Unknown'))
+
+                                # 顯示來源 (關鍵檢查點：如果是 Linux 環境，這裡應該是正斜線 /)
                                 st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
                                 st.text(doc.page_content[:100] + "...")
                                 st.divider()
