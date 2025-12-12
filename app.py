@@ -18,7 +18,8 @@ st.caption("🚀 Powered by RAG (Auto-Build on Cloud)")
 
 # 2. 定義一個函式來「現場建立」資料庫
 def build_vector_db(file_path, db_path, embedding_function):
-    with st.spinner("📦 正在雲端環境初始化資料庫 (初次執行需約 10-20 秒)..."):
+    # 確保這行文字存在，這樣你才會在網頁上看到轉圈圈
+    with st.spinner("🏗️ 偵測到新環境！正在重新建立向量資料庫 (約需 20 秒)..."):
         # 讀取 PDF
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -47,7 +48,7 @@ def load_rag_system():
 
     # 設定路徑 (改個新名字，避免讀到舊的壞檔)
     FILE_PATH = os.path.join("data", "labor_law.pdf")
-    CHROMA_PATH = "chroma_db_cloud"
+    CHROMA_PATH = "chroma_db_v3_force_rebuild"
 
     # 準備 Embedding 模型
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
