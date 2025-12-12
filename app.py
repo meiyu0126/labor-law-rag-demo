@@ -140,7 +140,15 @@ if prompt := st.chat_input():
                             for i, doc in enumerate(source_docs):
                                 page = doc.metadata.get('page', 'Unknown')
                                 source = os.path.basename(doc.metadata.get('source', 'Unknown'))
-                                st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
+                                # 修改前
+                                # st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page} 頁)")
+
+                                # 修改後 (將 page 轉為整數並 +1)
+                                try:
+                                    page_num = int(page) + 1
+                                except:
+                                    page_num = page
+                                st.markdown(f"**來源 {i + 1}**: `{source}` (第 {page_num} 頁)")
                                 st.text(doc.page_content[:100] + "...")
                                 st.divider()
 
