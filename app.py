@@ -11,22 +11,22 @@ import os
 
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
-st.title("⚖️ 企業勞基法智慧問答助手 (V12 - High Precision Threshold)")
-st.caption("🚀 Powered by RAG (With Similarity Threshold Filter)")
+st.title("⚖️ 企業勞基法智慧問答助手 (V13 - Final Clean)")
+st.caption("🚀 Powered by RAG (Precision Tuned: k=5, Threshold=0.5)")
 
 
 # 2. 建立資料庫 (純邏輯)
 def build_vector_db_in_memory(file_path, embedding_function):
     try:
-        print(f"--- [V12] 開始建立記憶體資料庫 ---")
+        print(f"--- [V13] 開始建立記憶體資料庫 ---")
         loader = PyPDFLoader(file_path)
         docs = loader.load()
         if not docs: return None
 
-        # 【優化 1】增加 Overlap，減少法條被「腰斬」的閱讀不適感
+        # 維持 V12 的切片策略：500字 + 200重疊 (保證法條完整性)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
-            chunk_overlap=200,  # 加大重疊區域
+            chunk_overlap=200,
             separators=["\n\n", "\n", "。", "！", "？", "，"]
         )
         chunks = text_splitter.split_documents(docs)
@@ -41,7 +41,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
 # 3. 載入系統
 @st.cache_resource(show_spinner=False)
-def load_rag_system_v12():
+def load_rag_system_v13():
     load_dotenv()
     FILE_PATH = os.path.join("data", "labor_law.pdf")
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
@@ -49,14 +49,12 @@ def load_rag_system_v12():
     db = build_vector_db_in_memory(FILE_PATH, embedding_function)
     if db is None: return None
 
-    # 【優化 2】關鍵修改：加入門檻過濾 (Similarity Score Threshold)
-    # 這裡的邏輯是：先找前 10 筆 (k=10)，但只保留相似度 > 0.3 的
-    # 注意：Chroma 的分數邏輯有時較複雜，0.3 是一個經驗值，如果不夠再調高
+    # 【關鍵優化】：提高門檻，減少數量
     retriever = db.as_retriever(
         search_type="similarity_score_threshold",
         search_kwargs={
-            "score_threshold": 0.3,  # 設定門檻，過濾掉太不像的雜訊 (如第12頁)
-            "k": 6  # 稍微抓多一點進來過濾
+            "score_threshold": 0.5,  # 提高門檻到 0.5 (過濾掉退休金那些似是而非的條文)
+            "k": 5  # 只抓前 5 名 (剛好涵蓋完整的第 24 條相關 Chunk，切掉第 6 名的雜訊)
         }
     )
 
@@ -64,6 +62,7 @@ def load_rag_system_v12():
 
     template = """你是一個專業的勞基法問答助手。
     請務必「只」依據以下的【參考資料】來回答使用者的問題。
+    回答時，請優先引用具體的「法條條號」（例如：根據第 24 條...）。
 
     【參考資料】：
     {context}
@@ -98,15 +97,15 @@ def load_rag_system_v12():
 
 # 4. 初始化 Session
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手 (V12)。"}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手 (V13)。"}]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
 # 5. 載入系統
 if "rag_chain" not in st.session_state:
-    with st.spinner("🚀 [V12] 系統升級中... 正在啟用精準過濾模式..."):
-        st.session_state.rag_chain = load_rag_system_v12()
+    with st.spinner("🚀 [V13] 系統微調中... 正在優化檢索精度..."):
+        st.session_state.rag_chain = load_rag_system_v13()
 
 rag_chain = st.session_state.rag_chain
 
@@ -117,7 +116,7 @@ if prompt := st.chat_input():
 
     if rag_chain:
         with st.chat_message("assistant"):
-            with st.spinner("🔍 正在檢索並過濾雜訊..."):
+            with st.spinner("🔍 正在檢索最相關法條..."):
                 try:
                     result = rag_chain.invoke(prompt)
                     response_text = result["response"]
@@ -125,12 +124,11 @@ if prompt := st.chat_input():
 
                     st.write(response_text)
 
-                    # 【優化 3】顯示邏輯：如果有來源才顯示，且只顯示通過門檻的
+                    # 顯示資料來源 (只顯示通過門檻的)
                     if source_docs:
                         with st.expander("📚 查看最佳參考來源 (Filtered Sources)", expanded=False):
                             for i, doc in enumerate(source_docs):
                                 try:
-                                    # 嘗試讀取頁碼，若無則顯示 Unknown
                                     page_idx = doc.metadata.get('page', 0)
                                     page_num = int(page_idx) + 1
                                 except:
@@ -142,12 +140,11 @@ if prompt := st.chat_input():
                                 st.markdown(f"### 🏅 來源 {i + 1}: 第 {page_num} 頁")
                                 st.info(content)
                     else:
-                        st.warning("⚠️ 查無高相關性的法規條文 (可能因相似度低於門檻而被過濾)。")
+                        st.warning("⚠️ 查無高相關性的法規條文 (可能因相似度低於 0.5 門檻而被過濾)。")
 
                     st.session_state.messages.append({"role": "assistant", "content": response_text})
 
                 except Exception as e:
-                    # 如果是因為找不到相關文章 (門檻太高導致空集合)，LangChain 有時會報錯
                     if "No relevant" in str(e) or "empty" in str(e):
                         st.warning("⚠️ 查無相關法規，請嘗試換個問法。")
                     else:
