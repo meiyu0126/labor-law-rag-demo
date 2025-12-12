@@ -55,7 +55,7 @@ def load_rag_system_v12():
     retriever = db.as_retriever(
         search_type="similarity_score_threshold",
         search_kwargs={
-            "score_threshold": 0.3,  # 設定門檻，過濾掉太不像的雜訊 (如第12頁)
+            "score_threshold": 0.4,  # 設定門檻，過濾掉太不像的雜訊 (如第12頁)
             "k": 6  # 稍微抓多一點進來過濾
         }
     )
