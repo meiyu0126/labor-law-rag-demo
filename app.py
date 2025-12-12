@@ -36,7 +36,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
         chunks = text_splitter.split_documents(docs)
 
         # 過濾太短的雜訊
-        clean_chunks = [c for c in chunks if len(c.page_content) > 50]
+        clean_chunks = [c for c in chunks if len(c.page_content) > 100]
 
         db = Chroma.from_documents(
             documents=clean_chunks,
