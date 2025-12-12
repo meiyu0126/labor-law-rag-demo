@@ -12,3 +12,7 @@ __pycache__/
 # 忽略 IDE 設定
 .idea/
 .vscode/
+
+test_score.py
+
+chroma_db/
