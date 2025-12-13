@@ -7,6 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
+from operator import itemgetter
 import os
 
 # 1. 設定頁面
@@ -50,6 +51,16 @@ def build_vector_db_in_memory(file_path, embedding_function):
         print(f"❌ 建立失敗: {e}")
         return None
 
+# --- 建議把 format_chat_history 搬到這裡 ---
+def format_chat_history(messages):
+    history_text = ""
+    recent_messages = messages[-6:]
+    for msg in recent_messages:
+        if msg["role"] == "user":
+            history_text += f"使用者: {msg['content']}\n"
+        elif msg["role"] == "assistant":
+            history_text += f"助手: {msg['content']}\n"
+    return history_text
 
 # 3. 載入系統
 @st.cache_resource(show_spinner=False)
@@ -76,23 +87,45 @@ def load_rag_system_v19():
 
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
+    #template = """你是一個專業的勞基法問答助手。
+    #請務必「只」依據以下的【參考資料】來回答使用者的問題。
+
+    #【參考資料】：
+    #{context}
+
+    #使用者問題：{question}
+
+    #回答："""
+    # 修改後的 template (加入 {chat_history})
     template = """你是一個專業的勞基法問答助手。
-    請務必「只」依據以下的【參考資料】來回答使用者的問題。
+        請依據【參考資料】與【歷史對話】來回答使用者的問題。
 
-    【參考資料】：
-    {context}
+        【歷史對話】：
+        {chat_history}
 
-    使用者問題：{question}
+        【參考資料】：
+        {context}
 
-    回答："""
+        使用者問題：{question}
+
+        回答："""
 
     prompt = ChatPromptTemplate.from_template(template)
 
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
+    # 修改 Chain 的輸入處理
+    # 這裡的意思是：
+    # 1. context: 拿字典裡的 "question" 去做檢索 (retriever)
+    # 2. question: 拿字典裡的 "question" 直接傳下去
+    # 3. chat_history: 拿字典裡的 "chat_history" 直接傳下去
     retrieval_step = RunnableParallel(
-        {"context": retriever, "question": RunnablePassthrough()}
+        {
+            "context": itemgetter("question") | retriever,
+            "question": itemgetter("question"),
+            "chat_history": itemgetter("chat_history"),
+        }
     )
 
     answer_step = (
@@ -133,10 +166,21 @@ if prompt := st.chat_input():
         with st.chat_message("assistant"):
             with st.spinner("🔍 正在進行精準檢索..."):
                 try:
-                    result = rag_chain.invoke(prompt)
+                    # ---【關鍵修改開始】---
+
+                    # 1. 整理歷史紀錄
+                    history_str = format_chat_history(st.session_state.messages[:-1])  # 排除剛剛輸入的那句
+
+                    # 2. 改成傳入「字典」，包含問題與歷史
+                    result = rag_chain.invoke({
+                        "question": prompt,
+                        "chat_history": history_str
+                    })
+
+                    # ---【關鍵修改結束】---
+
                     response_text = result["response"]
                     source_docs = result["context"]
-
                     st.write(response_text)
 
                     if source_docs:
