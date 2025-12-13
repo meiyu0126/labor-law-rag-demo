@@ -16,3 +16,5 @@ __pycache__/
 test_score.py
 
 chroma_db/
+
+chroma_db_data/

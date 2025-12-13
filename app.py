@@ -16,10 +16,25 @@ st.title("⚖️ 企業勞基法智慧問答助手")
 st.caption("🚀 Powered by Large Model ")
 
 
-# 2. 建立資料庫
+# 2. 建立或載入資料庫 (Persistence 版本)
 def build_vector_db_in_memory(file_path, embedding_function):
+    # 設定資料庫要存在哪個資料夾 (請確保這個資料夾名稱有在 .gitignore 裡)
+    PERSIST_DIR = "chroma_db_data"
+
+    # 檢查資料夾是否存在
+    if os.path.exists(PERSIST_DIR):
+        print(f"--- [V19] 發現已存在的資料庫 ({PERSIST_DIR})，直接載入，不扣款！ ---")
+        # 直接讀取硬碟上的資料庫
+        db = Chroma(
+            persist_directory=PERSIST_DIR,
+            embedding_function=embedding_function,
+            collection_name="labor_laws_v19_optimized"
+        )
+        return db
+
+    # 如果資料夾不存在，才開始建立
     try:
-        print(f"--- [V19] 開始建立記憶體資料庫 ---")
+        print(f"--- [V19] 找不到資料庫，開始建立新資料庫 (會呼叫 OpenAI API)... ---")
 
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -27,8 +42,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
             print("❌ 錯誤: PDF 內容為空")
             return None
 
-        # 【優化 1】加大 chunk_size 到 800
-        # 這樣可以確保第 30 條這種長條文能被完整包含，不會只顯示一小段
+        # 切分設定
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
             chunk_overlap=20,
@@ -36,15 +50,17 @@ def build_vector_db_in_memory(file_path, embedding_function):
         )
         chunks = text_splitter.split_documents(docs)
 
-        # 過濾太短的雜訊
+        # 過濾雜訊
         clean_chunks = [c for c in chunks if len(c.page_content) > 150]
 
+        # 建立資料庫並指定儲存路徑 (persist_directory)
         db = Chroma.from_documents(
             documents=clean_chunks,
             embedding=embedding_function,
-            collection_name="labor_laws_v19_optimized"
+            collection_name="labor_laws_v19_optimized",
+            persist_directory=PERSIST_DIR  # <--- 關鍵：告訴它存到硬碟
         )
-        print("✅ 資料庫建立成功！")
+        print("✅ 資料庫建立並儲存成功！")
         return db
 
     except Exception as e:
