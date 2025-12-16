@@ -12,7 +12,7 @@ import os
 
 # 1. 設定頁面
 st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
-st.title("⚖️ 企業勞基法智慧問答助手")
+st.title("⚖️ 企業勞基法智慧問答助手(update Overlap 40!)")
 st.caption("🚀 Powered by Large Model ")
 
 
@@ -45,7 +45,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
         # 切分設定
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
-            chunk_overlap=20,
+            chunk_overlap=40,
             separators=["\n\n", "\n", "。", "！", "？", "，"]
         )
         chunks = text_splitter.split_documents(docs)
