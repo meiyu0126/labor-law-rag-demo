@@ -89,11 +89,13 @@ def load_rag_system_v19():
     db = build_vector_db_in_memory(FILE_PATH, embedding_function)
     if db is None: return None
 
-    # 【優化 2 & 3】調整 MMR 參數
+    # 設定 MMR 參數
     # lambda_mult=0.85: 強烈要求「相關性」，只允許一點點「多樣性」。
     # k=4: 只取前 4 名，避免第 5 名開始出現不相關的雜訊。
     retriever = db.as_retriever(
+        # 關鍵 1：告訴 ChromaDB 不要用預設的相似度搜尋，改用 MMR
         search_type="mmr",
+        # 關鍵 2：設定 MMR 演算法的參數
         search_kwargs={
             "k": 4,
             "fetch_k": 20,
