@@ -23,7 +23,7 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ 系統參數")
     st.info(f"Chunk Size: 1000")
-    st.info(f"Chunk Overlap: 40")
+    st.info(f"Chunk Overlap: 30")
 
     if uploaded_file:
         st.success(f"目前使用文件：\n{uploaded_file.name}")
@@ -49,7 +49,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
         # 切分設定 (維持您的最佳參數)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
-            chunk_overlap=40,
+            chunk_overlap=30,
             separators=["\n\n", "\n", "。", "！", "？", "，"]
         )
         chunks = text_splitter.split_documents(docs)
@@ -96,11 +96,11 @@ def load_rag_system_v22(target_file_path):
         search_kwargs={
             "k": 4,
             "fetch_k": 20,
-            "lambda_mult": 0.5
+            "lambda_mult": 0.85
         }
     )
 
-    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     template = """你是一個專業的文件問答助手。
     請依據【參考資料】與【歷史對話】來回答使用者的問題。
