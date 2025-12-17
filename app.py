@@ -7,27 +7,38 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
-from operator import itemgetter
 import os
+import tempfile  # <--- 新增這個模組來處理上傳檔案
 
 # 1. 設定頁面
-st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
-st.title("⚖️ 企業勞基法智慧問答助手(update Overlap 40!)")
-st.caption("🚀 Powered by Large Model ")
+st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
+st.title("📂 企業智能文件問答助手 (V22 - Upload Support)")
+st.caption("🚀 Powered by Large Model + Custom PDF Upload")
 
-# --- 新增這段：側邊欄顯示參數 ---
+# --- 側邊欄：檔案上傳區 ---
 with st.sidebar:
-    st.header("⚙️ 系統參數檢查")
-    # 這裡直接寫死您程式碼裡設定的數字，如果這裡顯示 40，代表這份 code 真的是新的
-    current_overlap = 40
+    st.header("📂 文件上傳")
+    uploaded_file = st.file_uploader("請上傳您的 PDF 文件", type=["pdf"])
+
+    st.divider()
+    st.header("⚙️ 系統參數")
     st.info(f"Chunk Size: 1000")
-    st.info(f"Chunk Overlap: {current_overlap}")
-    st.caption("若 Overlap 為 40，代表新版已部署。")
-# -----------------------------
+    st.info(f"Chunk Overlap: 40")
+
+    if uploaded_file:
+        st.success(f"目前使用文件：\n{uploaded_file.name}")
+    else:
+        st.warning("目前使用預設文件：\n勞動基準法.pdf")
+
+
+# -------------------------
+
 # 2. 建立資料庫 (雲端安全版 - In-Memory)
 def build_vector_db_in_memory(file_path, embedding_function):
     try:
-        print(f"--- [V21] 開始建立記憶體資料庫 (In-Memory) ---")
+        # 顯示處理中的檔案名稱
+        file_name = os.path.basename(file_path)
+        print(f"--- [V22] 開始處理檔案: {file_name} ---")
 
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -35,7 +46,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
             print("❌ 錯誤: PDF 內容為空")
             return None
 
-        # 切分設定 (您的新設定)
+        # 切分設定 (維持您的最佳參數)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
             chunk_overlap=40,
@@ -48,12 +59,16 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
         print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
 
-        # 【關鍵修正】：不使用 persist_directory，避免雲端權限錯誤
-        # 加上 unique collection name 強制重建
+        # 使用檔案名稱來作為 Collection Name，確保不同檔案不會混在一起
+        # 這裡做一點字串處理，把檔名變成合法的 Collection Name (只留英數)
+        import re
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:50]
+        collection_name = f"rag_coll_{safe_name}"
+
         db = Chroma.from_documents(
             documents=clean_chunks,
             embedding=embedding_function,
-            collection_name="labor_laws_v21_overlap_40"
+            collection_name=collection_name
         )
         print("✅ 資料庫建立成功 (記憶體模式)！")
         return db
@@ -62,77 +77,51 @@ def build_vector_db_in_memory(file_path, embedding_function):
         print(f"❌ 建立失敗: {e}")
         return None
 
-# --- 建議把 format_chat_history 搬到這裡 ---
-def format_chat_history(messages):
-    history_text = ""
-    recent_messages = messages[-6:]
-    for msg in recent_messages:
-        if msg["role"] == "user":
-            history_text += f"使用者: {msg['content']}\n"
-        elif msg["role"] == "assistant":
-            history_text += f"助手: {msg['content']}\n"
-    return history_text
 
-# 3. 載入系統
+# 3. 載入系統 (快取邏輯調整)
+# 這裡我們把 file_path 當作快取的 key
+# 只要 file_path 改變 (例如使用者上傳了新檔案)，快取就會失效，自動重建 DB
 @st.cache_resource(show_spinner=False)
-def load_rag_system_v19():
+def load_rag_system_v22(target_file_path):
     load_dotenv()
-    FILE_PATH = os.path.join("data", "labor_law.pdf")
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
 
-    db = build_vector_db_in_memory(FILE_PATH, embedding_function)
+    db = build_vector_db_in_memory(target_file_path, embedding_function)
     if db is None: return None
 
-    # 設定 MMR 參數
-    # lambda_mult=0.85: 強烈要求「相關性」，只允許一點點「多樣性」。
-    # k=4: 只取前 4 名，避免第 5 名開始出現不相關的雜訊。
+    # 維持您的 MMR 設定
     retriever = db.as_retriever(
-        # 關鍵 1：告訴 ChromaDB 不要用預設的相似度搜尋，改用 MMR
         search_type="mmr",
-        # 關鍵 2：設定 MMR 演算法的參數
         search_kwargs={
             "k": 4,
             "fetch_k": 20,
-            "lambda_mult": 0.85
+            "lambda_mult": 0.5
         }
     )
 
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 
-    #template = """你是一個專業的勞基法問答助手。
-    #請務必「只」依據以下的【參考資料】來回答使用者的問題。
+    template = """你是一個專業的文件問答助手。
+    請依據【參考資料】與【歷史對話】來回答使用者的問題。
 
-    #【參考資料】：
-    #{context}
+    【歷史對話】：
+    {chat_history}
 
-    #使用者問題：{question}
+    【參考資料】：
+    {context}
 
-    #回答："""
-    # 修改後的 template (加入 {chat_history})
-    template = """你是一個專業的勞基法問答助手。
-        請依據【參考資料】與【歷史對話】來回答使用者的問題。
+    使用者問題：{question}
 
-        【歷史對話】：
-        {chat_history}
-
-        【參考資料】：
-        {context}
-
-        使用者問題：{question}
-
-        回答："""
+    回答："""
 
     prompt = ChatPromptTemplate.from_template(template)
 
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    # 修改 Chain 的輸入處理
-    # 這裡的意思是：
-    # 1. context: 拿字典裡的 "question" 去做檢索 (retriever)
-    # 2. question: 拿字典裡的 "question" 直接傳下去
-    # 3. chat_history: 拿字典裡的 "chat_history" 直接傳下去
+    from operator import itemgetter
+
     retrieval_step = RunnableParallel(
         {
             "context": itemgetter("question") | retriever,
@@ -156,48 +145,73 @@ def load_rag_system_v19():
     return final_chain
 
 
-# 4. 初始化 Session
+# --- 歷史訊息處理 ---
+def format_chat_history(messages):
+    history_text = ""
+    recent_messages = messages[-6:]
+    for msg in recent_messages:
+        if msg["role"] == "user":
+            history_text += f"使用者: {msg['content']}\n"
+        elif msg["role"] == "assistant":
+            history_text += f"助手: {msg['content']}\n"
+    return history_text
+
+
+# 4. 處理檔案邏輯 (關鍵步驟)
+if uploaded_file:
+    # 如果使用者有上傳檔案
+    # 1. 建立一個暫存檔
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_file_path = tmp_file.name
+else:
+    # 如果沒上傳，使用預設的勞基法
+    tmp_file_path = os.path.join("data", "labor_law.pdf")
+
+# 5. 初始化 Session
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "你好！我是你的勞基法 AI 助手,請輸入勞基法相關查詢我會盡力為你提供說明。"}]
+    st.session_state["messages"] = [{"role": "assistant", "content": "你好！請上傳 PDF 文件，或直接詢問勞基法相關問題。"}]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 5. 載入系統
-if "rag_chain" not in st.session_state:
-    with st.spinner("🚀 [V19] 系統優化中... 正在調整切片大小與權重..."):
-        st.session_state.rag_chain = load_rag_system_v19()
+# 6. 載入系統 (根據 tmp_file_path 決定是否重建)
+if "rag_chain" not in st.session_state or st.session_state.get("current_file") != tmp_file_path:
+    with st.spinner("🚀 正在分析文件並建立知識庫..."):
+        # 呼叫建庫函式
+        chain = load_rag_system_v22(tmp_file_path)
+        # 將 chain 存入 session
+        st.session_state.rag_chain = chain
+        # 記錄目前使用的檔案路徑，以便偵測變更
+        st.session_state.current_file = tmp_file_path
+
+        # 如果是切換檔案，建議清空對話紀錄，避免混淆 (可選)
+        # st.session_state.messages = [{"role": "assistant", "content": "已切換文件，請發問！"}]
 
 rag_chain = st.session_state.rag_chain
 
-# 6. 處理輸入
+# 7. 處理輸入
 if prompt := st.chat_input():
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
     if rag_chain:
         with st.chat_message("assistant"):
-            with st.spinner("🔍 正在進行精準檢索..."):
+            with st.spinner("🔍 正在檢索..."):
                 try:
-                    # ---【關鍵修改開始】---
+                    history_str = format_chat_history(st.session_state.messages[:-1])
 
-                    # 1. 整理歷史紀錄
-                    history_str = format_chat_history(st.session_state.messages[:-1])  # 排除剛剛輸入的那句
-
-                    # 2. 改成傳入「字典」，包含問題與歷史
                     result = rag_chain.invoke({
                         "question": prompt,
                         "chat_history": history_str
                     })
-
-                    # ---【關鍵修改結束】---
 
                     response_text = result["response"]
                     source_docs = result["context"]
                     st.write(response_text)
 
                     if source_docs:
-                        with st.expander("📚 查看最佳參考來源 (Top 4 - Optimized)", expanded=True):
+                        with st.expander("📚 查看最佳參考來源", expanded=True):
                             for i, doc in enumerate(source_docs):
                                 try:
                                     page_idx = doc.metadata.get('page', 0)
