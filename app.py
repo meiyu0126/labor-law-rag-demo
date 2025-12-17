@@ -95,7 +95,7 @@ def load_rag_system_v24(target_file_path):
         search_kwargs={
             "k": 3,
             "fetch_k": 20,
-            "lambda_mult": 0.7
+            "lambda_mult": 0.8
         }
     )
 
