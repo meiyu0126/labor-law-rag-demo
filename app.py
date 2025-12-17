@@ -13,8 +13,8 @@ import time
 
 # 1. 設定頁面
 st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
-st.title("📂 企業智能文件問答助手 (V24 - Precision Focus)")
-st.caption("🚀 Powered by Large Model + Strict Filtering")
+st.title("📂 企業智能文件問答助手")
+st.caption("🚀 Powered by Large Model")
 
 # --- 側邊欄 ---
 with st.sidebar:
