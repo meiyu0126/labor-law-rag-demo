@@ -55,6 +55,21 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
         # 過濾雜訊
         clean_chunks = [c for c in chunks if len(c.page_content) > 150]
+        # 1. 篩選出長度 <= 150 的片段 (原本被丟棄的部分)
+        noise_chunks = [c for c in chunks if len(c.page_content) <= 150]
+
+        print(f"🔍 共發現 {len(noise_chunks)} 筆被過濾的內容。\n")
+        print("以下列出前 5 筆範例供檢查：")
+        print("=" * 40)
+
+        # 2. 列印出來檢查 (為了避免洗版，這裡只先印前 5 筆)
+        for i, c in enumerate(noise_chunks[:5]):
+            content = c.page_content.strip()  # 去除前後空白讓顯示更整齊
+            length = len(c.page_content)
+
+            print(f"【被過濾片段 #{i + 1}】 (長度: {length})")
+            print(f"內容: {content}")
+            print("-" * 20)
 
         print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
 
