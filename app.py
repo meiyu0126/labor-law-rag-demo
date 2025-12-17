@@ -8,37 +8,35 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import os
-import tempfile  # <--- 新增這個模組來處理上傳檔案
+import tempfile
+import time # <--- 新增時間模組，用來產生唯一 ID
 
 # 1. 設定頁面
 st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
-st.title("📂 企業智能文件問答助手 (V22 - Upload Support)")
-st.caption("🚀 Powered by Large Model + Custom PDF Upload")
+st.title("📂 企業智能文件問答助手")
+st.caption("🚀 Powered by Large Model")
 
-# --- 側邊欄：檔案上傳區 ---
+# --- 側邊欄 ---
 with st.sidebar:
     st.header("📂 文件上傳")
     uploaded_file = st.file_uploader("請上傳您的 PDF 文件", type=["pdf"])
 
     st.divider()
     st.header("⚙️ 系統參數")
-    st.info(f"Chunk Size: 1000")
+    st.info(f"Chunk Size: 600") # 修正顯示文字
     st.info(f"Chunk Overlap: 30")
 
     if uploaded_file:
         st.success(f"目前使用文件：\n{uploaded_file.name}")
     else:
         st.warning("目前使用預設文件：\n勞動基準法.pdf")
-
-
 # -------------------------
 
-# 2. 建立資料庫 (雲端安全版 - In-Memory)
+# 2. 建立資料庫 (加上時間戳記，確保每次都是全新的)
 def build_vector_db_in_memory(file_path, embedding_function):
     try:
-        # 顯示處理中的檔案名稱
         file_name = os.path.basename(file_path)
-        print(f"--- [V22] 開始處理檔案: {file_name} ---")
+        print(f"--- [V23] 開始處理檔案: {file_name} ---")
 
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -46,7 +44,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
             print("❌ 錯誤: PDF 內容為空")
             return None
 
-        # 切分設定 (維持您的最佳參數)
+        # 切分設定
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
             chunk_overlap=30,
@@ -59,18 +57,20 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
         print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
 
-        # 使用檔案名稱來作為 Collection Name，確保不同檔案不會混在一起
-        # 這裡做一點字串處理，把檔名變成合法的 Collection Name (只留英數)
+        # 【關鍵修改 1】產生唯一的 Collection Name
+        # 加上時間戳記 (int(time.time()))，保證每次跑這行程式，都是開一個全新的籃子
+        # 這樣就絕對不會發生「舊資料還在，新資料又疊上去」的重複慘劇
         import re
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:50]
-        collection_name = f"rag_coll_{safe_name}"
+        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:30]
+        unique_id = int(time.time())
+        collection_name = f"rag_{safe_name}_{unique_id}"
 
         db = Chroma.from_documents(
             documents=clean_chunks,
             embedding=embedding_function,
             collection_name=collection_name
         )
-        print("✅ 資料庫建立成功 (記憶體模式)！")
+        print(f"✅ 資料庫建立成功 (ID: {unique_id})！")
         return db
 
     except Exception as e:
@@ -78,11 +78,9 @@ def build_vector_db_in_memory(file_path, embedding_function):
         return None
 
 
-# 3. 載入系統 (快取邏輯調整)
-# 這裡我們把 file_path 當作快取的 key
-# 只要 file_path 改變 (例如使用者上傳了新檔案)，快取就會失效，自動重建 DB
+# 3. 載入系統
 @st.cache_resource(show_spinner=False)
-def load_rag_system_v22(target_file_path):
+def load_rag_system_v23(target_file_path):
     load_dotenv()
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -90,13 +88,14 @@ def load_rag_system_v22(target_file_path):
     db = build_vector_db_in_memory(target_file_path, embedding_function)
     if db is None: return None
 
-    # 維持您的 MMR 設定
+    # 【關鍵修改 2】將 lambda_mult 降回 0.5
+    # 0.85 容易造成相似內容重複出現，0.5 會強迫 AI 找不同的觀點
     retriever = db.as_retriever(
         search_type="mmr",
         search_kwargs={
             "k": 4,
             "fetch_k": 20,
-            "lambda_mult": 0.85
+            "lambda_mult": 0.5
         }
     )
 
@@ -157,15 +156,12 @@ def format_chat_history(messages):
     return history_text
 
 
-# 4. 處理檔案邏輯 (關鍵步驟)
+# 4. 處理檔案邏輯
 if uploaded_file:
-    # 如果使用者有上傳檔案
-    # 1. 建立一個暫存檔
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
         tmp_file.write(uploaded_file.getvalue())
         tmp_file_path = tmp_file.name
 else:
-    # 如果沒上傳，使用預設的勞基法
     tmp_file_path = os.path.join("data", "labor_law.pdf")
 
 # 5. 初始化 Session
@@ -175,18 +171,13 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 6. 載入系統 (根據 tmp_file_path 決定是否重建)
+# 6. 載入系統
+# 使用 current_file 偵測變更，確保切換檔案時會重建
 if "rag_chain" not in st.session_state or st.session_state.get("current_file") != tmp_file_path:
-    with st.spinner("🚀 正在分析文件並建立知識庫..."):
-        # 呼叫建庫函式
-        chain = load_rag_system_v22(tmp_file_path)
-        # 將 chain 存入 session
+    with st.spinner("🚀 正在為新文件建立專屬知識庫..."):
+        chain = load_rag_system_v23(tmp_file_path) # 呼叫 v23
         st.session_state.rag_chain = chain
-        # 記錄目前使用的檔案路徑，以便偵測變更
         st.session_state.current_file = tmp_file_path
-
-        # 如果是切換檔案，建議清空對話紀錄，避免混淆 (可選)
-        # st.session_state.messages = [{"role": "assistant", "content": "已切換文件，請發問！"}]
 
 rag_chain = st.session_state.rag_chain
 
