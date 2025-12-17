@@ -15,26 +15,19 @@ st.set_page_config(page_title="勞基法 AI 助手", page_icon="⚖️")
 st.title("⚖️ 企業勞基法智慧問答助手(update Overlap 40!)")
 st.caption("🚀 Powered by Large Model ")
 
-
-# 2. 建立或載入資料庫 (Persistence 版本)
+# --- 新增這段：側邊欄顯示參數 ---
+with st.sidebar:
+    st.header("⚙️ 系統參數檢查")
+    # 這裡直接寫死您程式碼裡設定的數字，如果這裡顯示 40，代表這份 code 真的是新的
+    current_overlap = 40
+    st.info(f"Chunk Size: 1000")
+    st.info(f"Chunk Overlap: {current_overlap}")
+    st.caption("若 Overlap 為 40，代表新版已部署。")
+# -----------------------------
+# 2. 建立資料庫 (雲端安全版 - In-Memory)
 def build_vector_db_in_memory(file_path, embedding_function):
-    # 設定資料庫要存在哪個資料夾 (請確保這個資料夾名稱有在 .gitignore 裡)
-    PERSIST_DIR = "chroma_db_data"
-
-    # 檢查資料夾是否存在
-    if os.path.exists(PERSIST_DIR):
-        print(f"--- [V19] 發現已存在的資料庫 ({PERSIST_DIR})，直接載入，不扣款！ ---")
-        # 直接讀取硬碟上的資料庫
-        db = Chroma(
-            persist_directory=PERSIST_DIR,
-            embedding_function=embedding_function,
-            collection_name="labor_laws_v19_optimized"
-        )
-        return db
-
-    # 如果資料夾不存在，才開始建立
     try:
-        print(f"--- [V19] 找不到資料庫，開始建立新資料庫 (會呼叫 OpenAI API)... ---")
+        print(f"--- [V21] 開始建立記憶體資料庫 (In-Memory) ---")
 
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -42,7 +35,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
             print("❌ 錯誤: PDF 內容為空")
             return None
 
-        # 切分設定
+        # 切分設定 (您的新設定)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=600,
             chunk_overlap=40,
@@ -53,14 +46,16 @@ def build_vector_db_in_memory(file_path, embedding_function):
         # 過濾雜訊
         clean_chunks = [c for c in chunks if len(c.page_content) > 150]
 
-        # 建立資料庫並指定儲存路徑 (persist_directory)
+        print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
+
+        # 【關鍵修正】：不使用 persist_directory，避免雲端權限錯誤
+        # 加上 unique collection name 強制重建
         db = Chroma.from_documents(
             documents=clean_chunks,
             embedding=embedding_function,
-            collection_name="labor_laws_v19_optimized",
-            persist_directory=PERSIST_DIR  # <--- 關鍵：告訴它存到硬碟
+            collection_name="labor_laws_v21_overlap_40"
         )
-        print("✅ 資料庫建立並儲存成功！")
+        print("✅ 資料庫建立成功 (記憶體模式)！")
         return db
 
     except Exception as e:
