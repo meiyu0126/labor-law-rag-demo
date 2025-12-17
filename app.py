@@ -9,12 +9,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import os
 import tempfile
-import time # <--- 新增時間模組，用來產生唯一 ID
+import time
 
 # 1. 設定頁面
 st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
-st.title("📂 企業智能文件問答助手")
-st.caption("🚀 Powered by Large Model")
+st.title("📂 企業智能文件問答助手 (V24 - Precision Focus)")
+st.caption("🚀 Powered by Large Model + Strict Filtering")
 
 # --- 側邊欄 ---
 with st.sidebar:
@@ -23,8 +23,9 @@ with st.sidebar:
 
     st.divider()
     st.header("⚙️ 系統參數")
-    st.info(f"Chunk Size: 600") # 修正顯示文字
+    st.info(f"Chunk Size: 600")
     st.info(f"Chunk Overlap: 30")
+    st.info(f"Top-K: 3 (Strict)") # 顯示目前的設定
 
     if uploaded_file:
         st.success(f"目前使用文件：\n{uploaded_file.name}")
@@ -32,11 +33,11 @@ with st.sidebar:
         st.warning("目前使用預設文件：\n勞動基準法.pdf")
 # -------------------------
 
-# 2. 建立資料庫 (加上時間戳記，確保每次都是全新的)
+# 2. 建立資料庫
 def build_vector_db_in_memory(file_path, embedding_function):
     try:
         file_name = os.path.basename(file_path)
-        print(f"--- [V23] 開始處理檔案: {file_name} ---")
+        print(f"--- [V24] 開始處理檔案: {file_name} ---")
 
         loader = PyPDFLoader(file_path)
         docs = loader.load()
@@ -57,9 +58,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
         print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
 
-        # 【關鍵修改 1】產生唯一的 Collection Name
-        # 加上時間戳記 (int(time.time()))，保證每次跑這行程式，都是開一個全新的籃子
-        # 這樣就絕對不會發生「舊資料還在，新資料又疊上去」的重複慘劇
+        # 產生唯一 ID
         import re
         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:30]
         unique_id = int(time.time())
@@ -80,7 +79,7 @@ def build_vector_db_in_memory(file_path, embedding_function):
 
 # 3. 載入系統
 @st.cache_resource(show_spinner=False)
-def load_rag_system_v23(target_file_path):
+def load_rag_system_v24(target_file_path):
     load_dotenv()
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -88,14 +87,15 @@ def load_rag_system_v23(target_file_path):
     db = build_vector_db_in_memory(target_file_path, embedding_function)
     if db is None: return None
 
-    # 【關鍵修改 2】將 lambda_mult 降回 0.5
-    # 0.85 容易造成相似內容重複出現，0.5 會強迫 AI 找不同的觀點
+    # 【關鍵修改】
+    # 1. k=3: 只取前 3 名，砍掉第 4 名以後的雜訊。
+    # 2. lambda_mult=0.7: 稍微調高相似度權重，減少因為「追求多樣」而抓到退休金的情況。
     retriever = db.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 4,
+            "k": 3,
             "fetch_k": 20,
-            "lambda_mult": 0.5
+            "lambda_mult": 0.7
         }
     )
 
@@ -172,10 +172,9 @@ for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
 # 6. 載入系統
-# 使用 current_file 偵測變更，確保切換檔案時會重建
 if "rag_chain" not in st.session_state or st.session_state.get("current_file") != tmp_file_path:
-    with st.spinner("🚀 正在為新文件建立專屬知識庫..."):
-        chain = load_rag_system_v23(tmp_file_path) # 呼叫 v23
+    with st.spinner("🚀 正在優化檢索模型..."):
+        chain = load_rag_system_v24(tmp_file_path)
         st.session_state.rag_chain = chain
         st.session_state.current_file = tmp_file_path
 
@@ -202,7 +201,7 @@ if prompt := st.chat_input():
                     st.write(response_text)
 
                     if source_docs:
-                        with st.expander("📚 查看最佳參考來源", expanded=True):
+                        with st.expander("📚 查看最佳參考來源 (Top 3)", expanded=True):
                             for i, doc in enumerate(source_docs):
                                 try:
                                     page_idx = doc.metadata.get('page', 0)
