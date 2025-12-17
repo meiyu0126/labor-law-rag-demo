@@ -54,9 +54,9 @@ def build_vector_db_in_memory(file_path, embedding_function):
         chunks = text_splitter.split_documents(docs)
 
         # 過濾雜訊
-        clean_chunks = [c for c in chunks if len(c.page_content) > 150]
+        clean_chunks = [c for c in chunks if len(c.page_content) > 50]
         # 1. 篩選出長度 <= 150 的片段 (原本被丟棄的部分)
-        noise_chunks = [c for c in chunks if len(c.page_content) <= 150]
+        noise_chunks = [c for c in chunks if len(c.page_content) <= 50]
 
         print(f"🔍 共發現 {len(noise_chunks)} 筆被過濾的內容。\n")
         print("以下列出前 5 筆範例供檢查：")
