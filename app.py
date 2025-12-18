@@ -138,7 +138,7 @@ def load_rag_system_v24(target_file_path):
 
     retrieval_step = RunnableParallel(
         {
-            "context": itemgetter("question") | retriever | format_docs,
+            "context": itemgetter("question") | retriever ,
             "question": itemgetter("question"),
             "chat_history": itemgetter("chat_history"),
         }
