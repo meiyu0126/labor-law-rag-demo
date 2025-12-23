@@ -2,7 +2,8 @@ import os
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 from dotenv import load_dotenv
-
+#模擬當使用者問問題時，系統能不能精準地從資料庫撈出相關的法條。
+#這一步我們還不會呼叫 GPT 來回答問題，我們只做「搜尋」。這是為了確認 Search Accuracy (搜尋準確率)。
 # 1. 載入環境變數
 load_dotenv()
 
@@ -11,7 +12,7 @@ CHROMA_PATH = "chroma_db"
 
 def search_test():
     # 準備 Embedding Function (必須跟建立資料庫時用的一模一樣！)
-    embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
+    embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
 
     # 2. 連接現有的向量資料庫
     # 注意：這裡不用再餵 documents，只要指定 persist_directory
@@ -21,7 +22,7 @@ def search_test():
     )
 
     # 3. 模擬使用者提問
-    # 你可以隨意修改這個問題，例如："加班費怎麼算？"、"特休假幾天？"
+    # 問題可以隨意修改，例如："加班費怎麼算？"、"特休假幾天？"
     query = "加班費怎麼算？"
 
     print(f"🔎 正在搜尋問題：'{query}' ...")
@@ -37,6 +38,8 @@ def search_test():
         return
 
     for i, (doc, score) in enumerate(results):
+        #Score (相似度距離),ChromaDB 的 Score (L2 Distance):這是「距離」，所以數字越小代表越相似。
+        #0.0 代表完全一樣;通常小於 1.0代表相關性很高;如果 Score 大於 1.5 或 1.8，通常代表機器人開始亂找了 (這時候就需要設 Threshold 門檻值來過濾)。
         print(f"🏆 [第 {i + 1} 名] (相似度距離 Score: {score:.4f})")
         print(f"來源頁數: {doc.metadata.get('page')}")
         print(f"內容預覽: {doc.page_content[:100]}...")  # 只印出前100字避免洗版
