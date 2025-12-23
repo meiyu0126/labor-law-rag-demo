@@ -1,7 +1,9 @@
 import os
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+#這支 etl.py 負責 RAG 系統的資料前處理;用來測試「讀取」跟「切分」
+# 首先，使用 PyPDFLoader 將非結構化的 PDF 載入為文件物件。
+# 接著，採用 RecursiveCharacterTextSplitter 進行切分，設定 Chunk Size 為 500 並搭配 50 的 Overlap。 這樣的策略是為了適應 LLM 的 Context Window 限制，同時透過 Overlap 保持語意連貫性，最後保留頁碼 Metadata，以支援前端的引用來源顯示功能。
 # 設定資料路徑
 FILE_PATH = os.path.join("data", "labor_law.pdf")
 
@@ -15,7 +17,7 @@ def load_and_split_pdf():
     print(f"📂 開始讀取檔案：{FILE_PATH} ...")
 
     # 2. 載入器 (Loader)：負責將 PDF 轉為純文字物件 (Document Object)
-    # 這裡我們使用 LangChain 內建的 PyPDFLoader
+    #Extract (萃取)：使用 LangChain 內建的 PyPDFLoader將 PDF 轉為文字物件
     loader = PyPDFLoader(FILE_PATH)
     docs = loader.load()
     print(f"✅ 讀取成功！原始文件共有 {len(docs)} 頁。\n")
@@ -37,7 +39,7 @@ def load_and_split_pdf():
     print("=" * 40)
 
     # 4. 驗證結果：印出前 3 個片段來檢查品質
-    # 面試重點：這裡要檢查「條文」有沒有被硬生生切斷？
+    #這裡要檢查「條文」有沒有被硬生生切斷？
     for i, chunk in enumerate(chunks[:3]):
         print(f"📄 [片段 {i + 1}] (長度: {len(chunk.page_content)})")
         print(chunk.page_content)
