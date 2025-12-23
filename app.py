@@ -1,3 +1,4 @@
+#Streamlit是目前Python界最紅的快速架站工具
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -10,7 +11,14 @@ from dotenv import load_dotenv
 import os
 import tempfile
 import time
-
+#套件名稱,架構角色,功能說明 (Why do we need it?)
+#langchain,總指揮 (Orchestrator),這是核心框架。它負責把 LLM、資料庫、文件讀取器串接起來。就像 Java 的 Spring Framework，負責管理整個應用程式的流程。
+#langchain-community,擴充模組庫 (Extensions),LangChain 在最近的版本改版了，將第三方整合 (Integrations) 拆分出來。要使用大多數的工具 (如文件載入器、工具箱) 都需要它。
+#langchain-openai,大腦介面 (Model Interface),專門用來跟 OpenAI API (GPT-3.5/4o) 對接的驅動程式。
+#chromadb,向量資料庫 (Vector Store),這是 RAG 的長期記憶。它將文字轉換成向量 (Embeddings) 並儲存在本地端，讓我們可以用「語意」來搜尋資料，而不僅僅是關鍵字比對。
+#pypdf,資料讀取器 (Parser),我們的 ETL 工具。用來從 PDF 檔案中提取純文字，讓程式能夠「讀懂」勞基法文件。
+#tiktoken,計量單位 (Tokenizer),這是 OpenAI 開發的 Token 計算器。我們用它來計算字數與成本，並確保送給 AI 的文字量不會超過它的 Context Window 上限。
+#python-dotenv,金鑰管理 (Config Manager),用來讀取 .env 檔案中的設定。這是資安最佳實踐，避免把 API Key 硬寫在程式碼裡 (Hard-code)。
 # 1. 設定頁面
 st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
 st.title("📂 企業智能文件問答助手")
