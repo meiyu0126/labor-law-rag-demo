@@ -2,7 +2,7 @@ import os
 import sys
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-
+#用來測試的程式
 # 1. 載入環境變數
 # override=True 確保如果有系統變數，會以 .env 為主
 load_dotenv(override=True)
