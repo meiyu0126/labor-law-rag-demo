@@ -5,7 +5,9 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from dotenv import load_dotenv
-
+#這支程式除了切分文件(labor_law.pdf)為片段(chunk)之外
+#也使用 OpenAI 的 Embedding 模型 (text-embedding-3-large )將文字片段轉為數學向量 (Vectors)，並存入 ChromaDB
+#這支程式通常只需要在資料更新時執行一次。
 # 1. 載入環境變數 (API Key)
 load_dotenv()
 
@@ -15,7 +17,7 @@ CHROMA_PATH = "chroma_db"  # 向量資料庫要存放在哪個資料夾
 
 
 def create_vector_db():
-    # --- 步驟 A: 讀取與切分 (跟剛剛一樣) ---
+    # --- 步驟 A: 讀取與切分 (跟etl.py一樣) ---
     if not os.path.exists(FILE_PATH):
         print("❌ 找不到 PDF 檔案")
         return
@@ -41,11 +43,12 @@ def create_vector_db():
     # --- 步驟 C: Embedding 與 儲存 ---
     print("🧠 正在進行 Embedding (將文字轉為向量)...這需要一點時間...")
 
-    # 使用 OpenAI 的 Embedding 模型 (text-embedding-3-small 是目前 CP 值最高的)
-    embedding_function = OpenAIEmbeddings(model="text-embedding-3-small")
+    # 使用 OpenAI 的 Embedding 模型 (text-embedding-3-large )
+    embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
 
     # 建立並儲存到 ChromaDB
     # 這一步會同時做兩件事：1.呼叫OpenAI API轉向量 2.存入本地資料夾
+    #這些資料已經存入硬碟（chroma_db 資料夾），即使關掉電腦，這些記憶也不會消失。
     db = Chroma.from_documents(
         documents=chunks,
         embedding=embedding_function,
