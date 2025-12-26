@@ -1,3 +1,5 @@
+#Streamlit是目前Python界最紅的快速架站工具
+import shutil
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -38,16 +40,16 @@ def fetch_labor_law_docs():
         print("✅ 連線成功！開始解析 HTML...")
         soup = BeautifulSoup(response.text, "html.parser")
 
-        #鎖定「大寶箱」
+        # 【關鍵步驟 1】鎖定「大寶箱」
         law_content = soup.find(class_="law-reg-content")
 
         if law_content:
-            #找出每一條法規
+            # 【關鍵步驟 2】找出每一條法規
             all_rows = law_content.find_all(class_="row")
             print(f"🔍 共發現 {len(all_rows)} 個段落 (包含條文與章節標題)...\n")
 
             for row in all_rows:
-                #分離條號與內文
+                # 【關鍵步驟 3】分離條號與內文
                 col_no = row.find(class_="col-no")
                 col_data = row.find(class_="col-data")
                 #BeautifulSoup 最常用的方法 .get_text();它會把 HTML 標籤（<div>...</div>）丟掉，只留下裡面的字。
@@ -56,7 +58,7 @@ def fetch_labor_law_docs():
                     article_no = col_no.get_text(strip=True)
                     article_text = col_data.get_text(strip=True)
 
-                    #封裝成 Document
+                    # 【關鍵步驟 4】封裝成 Document
                     new_doc = Document(
                         page_content=f"{article_no}：{article_text}",
                         metadata={
@@ -69,6 +71,7 @@ def fetch_labor_law_docs():
 
             print(f"\n📦 成功轉換 {len(crawled_docs)} 條法規為 LangChain 文件物件！")
 
+            # 【修正 2】非常重要！一定要把結果回傳出去，不然外面拿到的是 None
             return crawled_docs
 
         else:
@@ -109,7 +112,7 @@ with st.sidebar:
         st.warning("目前使用預設文件：\n勞動基準法")
 # -------------------------
 
-# 3. 建立資料庫(支援 PDF 路徑 或 Document 列表)
+# 3. 建立資料庫(修改版：支援 PDF 路徑 或 Document 列表)
 def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False,original_filename=None):
     """
         source_data: 可以是檔案路徑 (str) 或是文件列表 (list)
@@ -119,6 +122,9 @@ def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False
         # --- 分支 A: 處理 PDF 檔案 ---
         if not is_web_data:
             file_path = source_data
+            #測試用
+            print(f"--- file_path: {file_path} ---")
+            print(f"--- os.path.basename(file_path): {os.path.basename(file_path)} ---")
             #如果有傳入原始檔名，就用原始檔名；否則用路徑檔名
             file_name = original_filename if original_filename else os.path.basename(file_path)
 
@@ -297,7 +303,7 @@ if uploaded_file:
         real_name = uploaded_file.name
 else:
     # 如果沒上傳，走網路爬蟲流程
-    # 不用存檔，直接把 Document 列表傳下去
+    # 我們不存檔了，直接把 Document 列表傳下去
     # 為了避免每次重新整理都爬一次，這裡也可以用 st.cache_data 優化，但先保持簡單
     target_source = fetch_labor_law_docs()
     is_web = True

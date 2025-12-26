@@ -1,3 +1,5 @@
+#Streamlit是目前Python界最紅的快速架站工具
+import shutil
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
@@ -16,8 +18,6 @@ from langchain_core.documents import Document
 
 load_dotenv()
 #從全國法規資料庫抓取勞動基準法
-# 加上這行，Streamlit 會把爬下來的結果存起來，不會每次都重跑
-@st.cache_data(ttl=3600) # ttl=3600 代表快取 1 小時後過期
 def fetch_labor_law_docs():
     # 1. 設定目標網址 (全國法規資料庫 - 勞動基準法)
     url = "https://law.moj.gov.tw/LawClass/LawAll.aspx?PCode=N0030001"
@@ -38,16 +38,16 @@ def fetch_labor_law_docs():
         print("✅ 連線成功！開始解析 HTML...")
         soup = BeautifulSoup(response.text, "html.parser")
 
-        #鎖定「大寶箱」
+        # 【關鍵步驟 1】鎖定「大寶箱」
         law_content = soup.find(class_="law-reg-content")
 
         if law_content:
-            #找出每一條法規
+            # 【關鍵步驟 2】找出每一條法規
             all_rows = law_content.find_all(class_="row")
             print(f"🔍 共發現 {len(all_rows)} 個段落 (包含條文與章節標題)...\n")
 
             for row in all_rows:
-                #分離條號與內文
+                # 【關鍵步驟 3】分離條號與內文
                 col_no = row.find(class_="col-no")
                 col_data = row.find(class_="col-data")
                 #BeautifulSoup 最常用的方法 .get_text();它會把 HTML 標籤（<div>...</div>）丟掉，只留下裡面的字。
@@ -56,7 +56,7 @@ def fetch_labor_law_docs():
                     article_no = col_no.get_text(strip=True)
                     article_text = col_data.get_text(strip=True)
 
-                    #封裝成 Document
+                    # 【關鍵步驟 4】封裝成 Document
                     new_doc = Document(
                         page_content=f"{article_no}：{article_text}",
                         metadata={
@@ -69,6 +69,7 @@ def fetch_labor_law_docs():
 
             print(f"\n📦 成功轉換 {len(crawled_docs)} 條法規為 LangChain 文件物件！")
 
+            # 【修正 2】非常重要！一定要把結果回傳出去，不然外面拿到的是 None
             return crawled_docs
 
         else:
@@ -101,7 +102,7 @@ with st.sidebar:
     st.header("⚙️ 系統參數")
     st.info(f"Chunk Size: 600")
     st.info(f"Chunk Overlap: 30")
-    st.info(f"Top-K: 2(Strict)") # 顯示目前的設定
+    st.info(f"Top-K: 3 (Strict)") # 顯示目前的設定
 
     if uploaded_file:
         st.success(f"目前使用文件：\n{uploaded_file.name}")
@@ -109,20 +110,16 @@ with st.sidebar:
         st.warning("目前使用預設文件：\n勞動基準法")
 # -------------------------
 
-# 3. 建立資料庫(支援 PDF 路徑 或 Document 列表)
-def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False,original_filename=None):
+# 3. 建立資料庫(修改版：支援 PDF 路徑 或 Document 列表)
+def build_vector_db_in_memory(file_path, embedding_function, is_web_data=False):
     """
         source_data: 可以是檔案路徑 (str) 或是文件列表 (list)
         is_web_data: 標記是否為網路爬蟲資料
     """
-    try:
-        # --- 分支 A: 處理 PDF 檔案 ---
-        if not is_web_data:
-            file_path = source_data
-            #如果有傳入原始檔名，就用原始檔名；否則用路徑檔名
-            file_name = original_filename if original_filename else os.path.basename(file_path)
-
-            print(f"--- 開始處理 PDF 檔案: {file_name} ---")
+    if uploaded_file:
+        try:
+            file_name = os.path.basename(file_path)
+            print(f"--- 開始處理檔案: {file_name} ---")
 
             loader = PyPDFLoader(file_path)
             docs = loader.load()
@@ -130,86 +127,90 @@ def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False
                 print("❌ 錯誤: PDF 內容為空")
                 return None
 
-            # 強制把 Metadata 裡的 source 改回原始檔名
-            # 這樣 UI 顯示時，才會是 "88十個童女.pdf" 而不是 "tmpxyz.pdf"
-            if original_filename:
-                for doc in docs:
-                    doc.metadata['source'] = original_filename
-
-            # PDF 需要切分 (Chunking)
+            # 切分設定
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=600,
                 chunk_overlap=30,
                 separators=["\n\n", "\n", "。", "！", "？", "，"]
             )
             chunks = text_splitter.split_documents(docs)
-        # --- 分支 B: 處理網路爬蟲資料 ---
-        else:
-            print("--- 開始處理網路爬蟲資料 ---")
-            docs = source_data  # source_data 是 List[Document]
-            if not docs:
-                print("❌ 錯誤: 爬蟲資料為空")
-                return None
-            # 網路爬蟲的資料每一條就是一條法規，通常不需要再切分，或者簡單切分即可
-            # 這裡我們直接把它當作 chunks 使用 (因為每一條法規長度適中)
-            chunks = docs
-            file_name = "web_labor_law"  # 給個假檔名
-        # --- 共同流程: 過濾雜訊與建庫 ---
-        # 過濾太短的雜訊
-        clean_chunks = [c for c in chunks if len(c.page_content) > 10]
-        print(f"📄 有效片段共 {len(clean_chunks)} 筆")
 
-        #以下這段程式碼的目的是為了給向量資料庫（ChromaDB）產生一個 「合法、安全且絕對唯一」 的 Collection 名稱。
-        # 因為資料庫對於名稱的規定通常很嚴格（例如：不能有空格、不能有特殊符號、不能太長），且我們不希望新的檔案覆蓋掉舊的檔案，所以需要這段「整形手術」。
-        import re
-        # re.sub(正則表達式, 替換成什麼, 目標字串);Python 的正則表達式取代功能
-        #r'[^a-zA-Z0-9]';[]：代表字元集合;^：代表「非」 (Not);a-zA-Z0-9：代表所有英文大小寫字母與數字
-        #r'[^a-zA-Z0-9]':只要不是英文字母或數字的字元（包含中文、空格、點、括號），全部都抓出來
-        #'_'：把抓出來的那些「非法字元」，全部替換成底線 _。
-        #[:30]：字串切片。不管檔名多長，只取前 30 個字。這是為了避免超過 ChromaDB 的名稱長度限制（通常限制 63 字元）。
-        #目的：確保檔名只剩下 ASCII 安全字元，不會讓資料庫報錯。範例： 如果 file_name 是 "勞基法 V1.0.pdf",結果： safe_name 會變成 "____V1_0_pdf" (中文和點都被變底線了)。
-        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:30]
-        #time.time()：取得目前的 Unix 時間戳記（從 1970/1/1 到現在經過的秒數），例如 1735118855.123。
-        #int(...)：轉成整數，去掉小數點。
-        #目的： 確保 「唯一性 (Uniqueness)」。
-        # 即使上傳同一個檔案 labor_law.pdf 兩次，因為時間不同，產生的 ID 就會不同，系統就不會搞混或錯誤覆蓋。
-        unique_id = int(time.time())
-        #組裝最終名稱 (Assembly)
-        #f"..."：Python 的 f-string 格式化字串。
-        #結構： 固定前綴 (rag_) + 清洗後的檔名 + 時間戳記。
-        #目的： 產生一個人類稍微看得懂（知道是 RAG 用的，也大概知道是哪個檔），且機器絕對讀得懂的 ID。
-        #例如:rag_______2025__pdf_1735000000
-        #ChromaDB 對 Collection Name 有嚴格的命名規範（通常要求由字母數字或底線組成，且長度有限制）。 此外，為了支援多版本管理或避免同名檔案衝突，加上time.time() 時間戳記，確保每次上傳建立的資料庫都是獨立且唯一的實體，這增加了系統的穩健性。
-        collection_name = f"rag_{safe_name}_{unique_id}"
+            # 過濾雜訊
+            clean_chunks = [c for c in chunks if len(c.page_content) > 50]
+            # 1. 篩選出長度 <= 50 的片段 (原本被丟棄的部分)
+            noise_chunks = [c for c in chunks if len(c.page_content) <= 50]
 
-        db = Chroma.from_documents(
-            documents=clean_chunks,
-            embedding=embedding_function,
-            collection_name=collection_name
-        )
-        print(f"✅ 資料庫建立成功 (ID: {unique_id})！")
-        return db
+            print(f"🔍 共發現 {len(noise_chunks)} 筆被過濾的內容。\n")
+            print("以下列出前 5 筆範例供檢查：")
+            print("=" * 40)
 
-    except Exception as e:
+            # 2. 列印出來檢查 (為了避免洗版，這裡只先印前 5 筆)
+            for i, c in enumerate(noise_chunks[:5]):
+                content = c.page_content.strip()  # 去除前後空白讓顯示更整齊
+                length = len(c.page_content)
+
+                print(f"【被過濾片段 #{i + 1}】 (長度: {length})")
+                print(f"內容: {content}")
+                print("-" * 20)
+
+                print(f"📄 切分完成，共 {len(clean_chunks)} 筆有效片段")
+
+            # 產生唯一 ID
+            import re
+            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', file_name)[:30]
+            unique_id = int(time.time())
+            collection_name = f"rag_{safe_name}_{unique_id}"
+
+            db = Chroma.from_documents(
+                documents=clean_chunks,
+                embedding=embedding_function,
+                collection_name=collection_name
+            )
+            print(f"✅ 資料庫建立成功 (ID: {unique_id})！")
+            return db
+
+        except Exception as e:
             print(f"❌ 建立失敗: {e}")
             return None
+    else:
+        CHROMA_PATH = "chroma_db_web_version"
+        docs = fetch_labor_law_docs()
+        if docs:
+            #檢查並清除舊資料庫
+            if os.path.exists(CHROMA_PATH):
+                print(f"🧹 偵測到舊資料庫，正在清理：{CHROMA_PATH} ...")
+                shutil.rmtree(CHROMA_PATH)  # 強制刪除整個資料夾
+                print("✨ 舊資料清理完成！")
+            print(f"💾 開始寫入向量資料庫 (共 {len(docs)} 筆)...")
 
-# 4. 載入系統
+            # 直接存進 DB
+            db = Chroma.from_documents(
+                documents=docs,
+                embedding=embedding_function,
+                persist_directory="./chroma_db_web_version"
+            )
+            print("🎉 資料庫建立完成！資料夾：chroma_db_web_version")
+        else:
+            print("⚠️ 沒有抓到任何資料，略過建庫步驟。")
+
+# 3. 載入系統
 @st.cache_resource(show_spinner=False)
-def load_rag_system(target_source,is_web=False,original_filename=None):
+def load_rag_system(target_file_path):
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
-    # 呼叫修改後的建庫函式
-    db = build_vector_db_in_memory(target_source, embedding_function, is_web_data=is_web,original_filename=original_filename)
+
+    db = build_vector_db_in_memory(target_file_path, embedding_function)
     if db is None: return None
 
-    # 1. k=2: 只取前2名
+    # 【關鍵修改】
+    # 1. k=3: 只取前 3 名，砍掉第 4 名以後的雜訊。
+    # 2. lambda_mult=0.7: 稍微調高相似度權重，減少因為「追求多樣」而抓到退休金的情況。
     retriever = db.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 2,
+            "k": 3,
             "fetch_k": 20,
-            "lambda_mult": 0.80
+            "lambda_mult": 0.8
         }
     )
 
@@ -273,6 +274,19 @@ def format_chat_history(messages):
             history_text += f"助手: {msg['content']}\n"
     return history_text
 
+
+
+# 4. 處理檔案邏輯
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+        tmp_file.write(uploaded_file.getvalue())
+        tmp_file_path = tmp_file.name
+else:
+    docs = fetch_labor_law_docs()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_webfile:
+        tmp_webfile.write(docs.getvalue())
+        tmp_file_path = tmp_webfile.name
+
 # 5. 初始化 Session
 if "messages" not in st.session_state:
     st.session_state["messages"] = [{"role": "assistant", "content": "你好！請上傳 PDF 文件，或直接詢問勞基法相關問題。"}]
@@ -280,39 +294,12 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 決定資料來源
-target_source = None
-is_web = False
-current_file_id = "default_web" # 用來識別檔案是否有變更
-real_name = None #初始化變數
-
-if uploaded_file:
-    # 如果有上傳檔案，走 PDF 流程
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        target_source = tmp_file.name
-        is_web = False
-        current_file_id = uploaded_file.name
-        #抓取使用者上傳的原始檔名
-        real_name = uploaded_file.name
-else:
-    # 如果沒上傳，走網路爬蟲流程
-    # 不用存檔，直接把 Document 列表傳下去
-    # 為了避免每次重新整理都爬一次，這裡也可以用 st.cache_data 優化，但先保持簡單
-    target_source = fetch_labor_law_docs()
-    is_web = True
-    current_file_id = "web_labor_law"
-
 # 6. 載入系統
-# 判斷是否需要重新建立 (檔案變了 OR 系統還沒初始化)
-if "rag_chain" not in st.session_state or st.session_state.get("current_file") != current_file_id:
-    with st.spinner("🚀 正在建置知識庫 (PDF/Web)..."):
-        # 傳入 source 和 標記
-        chain = load_rag_system(target_source, is_web=is_web, original_filename=real_name)
-
+if "rag_chain" not in st.session_state or st.session_state.get("current_file") != tmp_file_path:
+    with st.spinner("🚀 正在優化檢索模型..."):
+        chain = load_rag_system(tmp_file_path)
         st.session_state.rag_chain = chain
-        st.session_state.current_file = current_file_id
-
+        st.session_state.current_file = tmp_file_path
 rag_chain = st.session_state.rag_chain
 
 # 7. 處理輸入
@@ -362,22 +349,22 @@ if prompt := st.chat_input():
                     st.write(response_text)
 
                     if source_docs:
-                        with st.expander("📚 查看最佳參考來源 (Top 2)", expanded=True):
+                        #st.expander:使用 Streamlit 的摺疊元件來收納來源資料
+                        #expanded=True:設定 st.expander的「預設狀態」為展開
+                        with st.expander("📚 查看最佳參考來源 (Top 3)", expanded=True):
                             for i, doc in enumerate(source_docs):
-                                # --- 智慧判斷來源類型 ---
-                                # 如果有 'article_id' 代表是法規條文
-                                if 'article_id' in doc.metadata:
-                                    source_label = doc.metadata['article_id']  # 顯示 "第 24 條"
-                                    #page_info = ""  # 法規不需要頁碼
-                                # 否則就是 PDF，顯示頁碼
-                                else:
+                                try:
+                                    #取得頁碼邏輯
                                     page_idx = doc.metadata.get('page', 0)
-                                    source_label = f"第 {int(page_idx) + 1} 頁"
+                                    page_num = int(page_idx) + 1
+                                except:
+                                    page_num = "?"
 
-                                source_name = os.path.basename(doc.metadata.get('source', 'Unknown'))
+                                source = os.path.basename(doc.metadata.get('source', 'Unknown'))
+                                #去除PDF切分時產生的多餘換行符號，讓文字在UI上的閱讀體驗更流暢。
                                 content = doc.page_content.replace('\n', ' ')
 
-                                st.markdown(f"### 🏅 來源 {i + 1}: {source_name} {source_label}")
+                                st.markdown(f"### 🏅 來源 {i + 1}: 第 {page_num} 頁")
                                 st.info(content)
                     #將response_text存入st.session_state.messages列表;為了讓這則回答成為下一次呼叫 format_chat_history 時的一部分，形成完整的對話上下文 (Context Loop)
                     st.session_state.messages.append({"role": "assistant", "content": response_text})

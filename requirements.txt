@@ -1,12 +1,12 @@
 #相依套件清單
 #必須給雲端伺服器 (Linux)所需要的套件的清單。
-langchain>=0.2.0
-langchain-community
+streamlit
 langchain-chroma
 langchain-openai
-chromadb
-tiktoken
-pypdf
+langchain-community
+langchain-text-splitters
 python-dotenv
-streamlit
-openai
+pypdf
+tiktoken
+beautifulsoup4
+requests
