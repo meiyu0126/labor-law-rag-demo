@@ -113,7 +113,7 @@ with st.sidebar:
 def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False,original_filename=None):
     """
         source_data: 可以是檔案路徑 (str) 或是文件列表 (list)
-        is_web_data: 標記是否為網路爬蟲資料
+        is_web_data: 標記是否為網路爬蟲資料;is_web_data=true->網路爬蟲資料
     """
     try:
         # --- 分支 A: 處理 PDF 檔案 ---
@@ -196,6 +196,9 @@ def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False
 
 # 4. 載入系統
 @st.cache_resource(show_spinner=False)
+# st.cache_resource 會自動檢查輸入參數 target_source (即爬蟲抓下來的 Document 列表) 的內容雜湊值 (Hash) 是否改變。
+# 若 fetch_labor_law_docs 的 1 小時快取過期 (Expire)，當使用者送出查詢 (Submit) 時，
+# 系統會強制重新爬取最新法條。若法條內容有更新，target_source 就會改變，進而觸發這裡重新建立向量資料庫。
 def load_rag_system(target_source,is_web=False,original_filename=None):
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
@@ -297,8 +300,6 @@ if uploaded_file:
         real_name = uploaded_file.name
 else:
     # 如果沒上傳，走網路爬蟲流程
-    # 不用存檔，直接把 Document 列表傳下去
-    # 為了避免每次重新整理都爬一次，這裡也可以用 st.cache_data 優化，但先保持簡單
     target_source = fetch_labor_law_docs()
     is_web = True
     current_file_id = "web_labor_law"
