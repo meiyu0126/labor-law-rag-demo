@@ -7,23 +7,50 @@
 
 ---
 
-## 🚀 專案特色 (Key Features)
+### 🚀 專案特色 (Project Highlights)
 
-### 1. 雙模組資料源 (Hybrid Data Sources)
-* **🕷️ 自動化法規爬蟲**：
-    * 使用 `Requests` + `BeautifulSoup4` 即時抓取全國法規資料庫的勞動基準法。
-    * 實作 **ETL 清洗**，將 HTML 轉換為結構化的 `Document` 物件（且以 Metadata 保留條號 ）。
-    * 應用 `st.cache_data` 機制，避免重複請求，提升效能並降低被封鎖風險。
-* **📄 自定義文件上傳**：
-    * 支援使用者上傳 PDF 檔案（如公司內規）。
-    * 使用 `tempfile` 與 `PyPDFLoader` 處理暫存與解析，實現即時切換知識庫。
+#### 1. 雙模組混合資料源 (Hybrid Data Sources)
 
-### 2. 精準 RAG 檢索架構
-* **模型升級**：採用 OpenAI **`text-embedding-3-large`** 進行高維度向量化，搭配 **`gpt-4o-mini`** 進行推論，大幅提升語意理解能力。
-* **智慧來源引用 (Smart Citation)**：
-    * 針對法規：精準顯示 **「第 X 條」**。
-    * 針對 PDF：精準顯示 **「第 X 頁」** 與原始檔名。
-* **抗幻覺機制**：系統被嚴格限制只能依據「檢索到的內容」回答，若查無資料會如實告知。
+系統能處理結構化與非結構化資料：
+
+* **🕷️ 自動化法規爬蟲 (Automated Web Crawler)**：
+* 利用 `Requests` 與 `BeautifulSoup4` 實作 ETL 流程，可即時從全國法規資料庫抓取最新勞動基準法。
+* 可將 HTML 解析為帶有條號 (Metadata) 的結構化 Document 物件，確保檢索時能精準引用條號。
+
+
+* **📄 自定義文件上傳 (User-Defined Knowledge Base)**：
+* 支援使用者上傳 PDF 內部文件（如公司章程）。
+* 透過 `tempfile` 處理記憶體與實體檔案路徑的轉換，實現即時的知識庫切換。
+
+
+
+#### 2. 智慧型快取與動態更新機制 (Smart Caching & CDC)
+
+為了兼顧「資料新鮮度」與「系統效能」，實作了多層次的快取策略：
+
+* **時間驅動快取 (Time-Based Caching)**：爬蟲函式設定 `@st.cache_data(ttl=3600)`，確保 1 小時內不會重複請求，避免 IP 被封鎖並降低延遲。
+* **內容驅動更新 (Content-Based CDC)**：
+* 利用 `hashlib.md5` 計算爬取內容或上傳檔案的數位指紋 (Hash)。
+* 系統僅在 **Hash 值改變**（代表法規修法或檔案內容變更）時，才會觸發高成本的向量資料庫重建，否則直接沿用快取，實現「秒回」體驗並大幅節省 OpenAI API 費用。
+
+
+
+#### 3. 高精度 RAG 檢索架構 (Precision RAG Architecture)
+
+採用業界標準的技術堆疊，解決 LLM 幻覺問題：
+
+* **先進模型應用**：使用 OpenAI 最新的 `text-embedding-3-large` 進行高維度語意向量化，搭配高性價比的 `gpt-4o-mini` 進行推論。
+* **MMR 演算法 (Maximal Marginal Relevance)**：捨棄單純的相似度搜尋，改用 MMR (`lambda_mult=0.80`)，在「相關性」與「多樣性」間取得平衡，避免檢索結果過於單一。
+* **LCEL 鏈式架構**：使用 LangChain Expression Language (LCEL) 建構 `RunnableParallel`，實現檢索與對話歷史處理的**自動平行化**，降低系統延遲。
+
+#### 4. 上下文感知與多輪對話 (Context-Aware & Multi-turn)
+
+* **滑動視窗記憶 (Sliding Window Memory)**：實作對話歷史管理，僅保留最後 6 則訊息傳送給 LLM。這不僅能讓 AI 記住前文（如：「那加班費呢？」），還能有效控制 Token 用量，防止 Context Window 溢出。
+
+#### 5. 友善的使用者介面與體驗 (UI/UX)
+
+* **精準來源溯源 (Smart Citation)**：RAG 的回答皆會附上來源出處。系統能智慧判斷來源類型，若是法規顯示「條號」，若是 PDF 則顯示「檔名 + 頁碼」。
+* **自動化流程**：結合 Streamlit 的 Session State 管理，使用者無需手動重新整理，系統會根據使用者操作(是否上傳檔案)自動判斷是否需要切換知識庫。
 
 ---
 
