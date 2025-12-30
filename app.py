@@ -14,7 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 import hashlib
-#套件名稱,架構角色,功能說明 (Why do we need it?)
+#requirements.txt中的套件名稱(原本 Python 沒有，需要額外安裝的套件),架構角色,功能說明 (Why do we need it?)
 #langchain,總指揮 (Orchestrator),這是核心框架。它負責把 LLM、資料庫、文件讀取器串接起來。就像 Java 的 Spring Framework，負責管理整個應用程式的流程。
 #langchain-community,擴充模組庫 (Extensions),LangChain 在最近的版本改版了，將第三方整合 (Integrations) 拆分出來。要使用大多數的工具 (如文件載入器、工具箱) 都需要它。
 #langchain-openai,大腦介面 (Model Interface),專門用來跟 OpenAI API (GPT-3.5/4o) 對接的驅動程式。
@@ -203,7 +203,7 @@ def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False
 def load_rag_system(target_source,is_web=False,original_filename=None):
 
     embedding_function = OpenAIEmbeddings(model="text-embedding-3-large")
-    # 呼叫修改後的建庫函式
+    # 呼叫建庫函式
     db = build_vector_db_in_memory(target_source, embedding_function, is_web_data=is_web,original_filename=original_filename)
     if db is None: return None
 
@@ -291,12 +291,15 @@ current_file_id = "default_web" # 用來識別檔案是否有變更
 real_name = None #初始化變數
 
 if uploaded_file:
+    file_bytes = uploaded_file.getvalue()
+    file_hash = hashlib.md5(file_bytes).hexdigest()
+    #確保上傳同名但是內容不同的PDF時,DB能被重建
+    current_file_id = f"pdf_{uploaded_file.name}_{file_hash}"
     # 如果有上傳檔案，走 PDF 流程
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
+        tmp_file.write(file_bytes)
         target_source = tmp_file.name
         is_web = False
-        current_file_id = uploaded_file.name
         #抓取使用者上傳的原始檔名
         real_name = uploaded_file.name
 else:
@@ -319,9 +322,14 @@ else:
 
 # 6. 載入系統
 # 判斷是否需要重新建立 (檔案變了 OR 系統還沒初始化)
+#知識庫其實就是DB
+#功能視角（給人看的）：稱之為「知識庫 (Knowledge Base)」。 因為這是 AI 用來「查閱資料、獲取知識」的地方。
+#技術視角（給程式看的）：稱之為「向量資料庫 (Vector Database)」。 因為在底層實作上，我們是使用 ChromaDB 這種技術，將文字轉換成向量 (Embedding) 後儲存起來 。
 if "rag_chain" not in st.session_state or st.session_state.get("current_file") != current_file_id:
     with st.spinner("🚀 正在建置知識庫 (PDF/Web)..."):
         # 傳入 source 和 標記
+        #load_rag_system是「總指揮」。它負責把所有元件（資料庫、模型、Prompt）組裝起來。 為了組裝，它必須先有資料庫，所以它會呼叫 build_vector_db_in_memory
+        #build_vector_db_in_memory是「苦力工」。它負責髒活累活：讀取 PDF/爬蟲資料 ➡️ 切分 (Chunking) ➡️ 呼叫 OpenAI 轉向量 ➡️ 建立 ChromaDB 實體。
         chain = load_rag_system(target_source, is_web=is_web, original_filename=real_name)
 
         st.session_state.rag_chain = chain
