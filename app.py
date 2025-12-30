@@ -13,6 +13,15 @@ import time
 import requests
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
+import hashlib
+#套件名稱,架構角色,功能說明 (Why do we need it?)
+#langchain,總指揮 (Orchestrator),這是核心框架。它負責把 LLM、資料庫、文件讀取器串接起來。就像 Java 的 Spring Framework，負責管理整個應用程式的流程。
+#langchain-community,擴充模組庫 (Extensions),LangChain 在最近的版本改版了，將第三方整合 (Integrations) 拆分出來。要使用大多數的工具 (如文件載入器、工具箱) 都需要它。
+#langchain-openai,大腦介面 (Model Interface),專門用來跟 OpenAI API (GPT-3.5/4o) 對接的驅動程式。
+#chromadb,向量資料庫 (Vector Store),這是 RAG 的長期記憶。它將文字轉換成向量 (Embeddings) 並儲存在本地端，讓我們可以用「語意」來搜尋資料，而不僅僅是關鍵字比對。
+#pypdf,資料讀取器 (Parser),我們的 ETL 工具。用來從 PDF 檔案中提取純文字，讓程式能夠「讀懂」勞基法文件。
+#tiktoken,計量單位 (Tokenizer),這是 OpenAI 開發的 Token 計算器。我們用它來計算字數與成本，並確保送給 AI 的文字量不會超過它的 Context Window 上限。
+#python-dotenv,金鑰管理 (Config Manager),用來讀取 .env 檔案中的設定。這是資安最佳實踐，避免把 API Key 硬寫在程式碼裡 (Hard-code)。
 
 load_dotenv()
 #從全國法規資料庫抓取勞動基準法
@@ -79,14 +88,6 @@ def fetch_labor_law_docs():
         print("❌ 網頁讀取失敗")
         return []
 
-#套件名稱,架構角色,功能說明 (Why do we need it?)
-#langchain,總指揮 (Orchestrator),這是核心框架。它負責把 LLM、資料庫、文件讀取器串接起來。就像 Java 的 Spring Framework，負責管理整個應用程式的流程。
-#langchain-community,擴充模組庫 (Extensions),LangChain 在最近的版本改版了，將第三方整合 (Integrations) 拆分出來。要使用大多數的工具 (如文件載入器、工具箱) 都需要它。
-#langchain-openai,大腦介面 (Model Interface),專門用來跟 OpenAI API (GPT-3.5/4o) 對接的驅動程式。
-#chromadb,向量資料庫 (Vector Store),這是 RAG 的長期記憶。它將文字轉換成向量 (Embeddings) 並儲存在本地端，讓我們可以用「語意」來搜尋資料，而不僅僅是關鍵字比對。
-#pypdf,資料讀取器 (Parser),我們的 ETL 工具。用來從 PDF 檔案中提取純文字，讓程式能夠「讀懂」勞基法文件。
-#tiktoken,計量單位 (Tokenizer),這是 OpenAI 開發的 Token 計算器。我們用它來計算字數與成本，並確保送給 AI 的文字量不會超過它的 Context Window 上限。
-#python-dotenv,金鑰管理 (Config Manager),用來讀取 .env 檔案中的設定。這是資安最佳實踐，避免把 API Key 硬寫在程式碼裡 (Hard-code)。
 # 2. 設定頁面
 st.set_page_config(page_title="企業智能問答助手", page_icon="📂")
 st.title("📂 企業智能文件問答助手")
@@ -112,7 +113,7 @@ with st.sidebar:
 # 3. 建立資料庫(支援 PDF 路徑 或 Document 列表)
 def build_vector_db_in_memory(source_data, embedding_function, is_web_data=False,original_filename=None):
     """
-        source_data: 可以是檔案路徑 (str) 或是文件列表 (list)
+        source_data: 可以是檔案路徑 (str) 或是文件列表 (List[Document])
         is_web_data: 標記是否為網路爬蟲資料;is_web_data=true->網路爬蟲資料
     """
     try:
@@ -300,9 +301,21 @@ if uploaded_file:
         real_name = uploaded_file.name
 else:
     # 如果沒上傳，走網路爬蟲流程
+    # 這裡因為前面有 @st.cache_data，所以如果沒過期會直接拿快取
+    # 如果過期了，就會真的去爬新資料回來
     target_source = fetch_labor_law_docs()
     is_web = True
-    current_file_id = "web_labor_law"
+    #current_file_id = "web_labor_law" 錯誤寫法,無法反應target_source的更新
+    #為了使current_file_id能夠隨著target_source的變化而更新,採取計算target_source內容的Hash做為判斷target_source是否已更新的依據
+    #一旦target_source已更新則current_file_id也必須改變啟動重建知識庫
+    #計算內容 Hash，讓 ID 跟著內容變
+    # 這樣只要法條有更新，Hash 就會變，current_file_id 就會變
+    # 進而觸發後面的 if 判斷，強制重建 ChromaDB
+    # 把所有 Document 的內容串起來做 Hash
+    content_str = "".join([doc.page_content for doc in target_source])
+    content_hash = hashlib.md5(content_str.encode("utf-8")).hexdigest()
+
+    current_file_id = f"web_labor_law_{content_hash}"
 
 # 6. 載入系統
 # 判斷是否需要重新建立 (檔案變了 OR 系統還沒初始化)
